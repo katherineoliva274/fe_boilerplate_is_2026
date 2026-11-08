@@ -93,7 +93,6 @@ function mismoDia(a: Date, b: Date): boolean {
   );
 }
 
-// Siete días calendario locales: hoy y los seis siguientes.
 function obtenerDias(hoy: Date): Date[] {
   return Array.from(
     { length: 7 },
@@ -152,7 +151,6 @@ export default function ClasesSemanaPage() {
   const [sala, setSala] = useState("");
   const [mensaje, setMensaje] = useState("");
 
-  // Simula la carga desde GET /api/class-sessions.
   useEffect(() => {
     const temporizador = setTimeout(() => {
       const ahora = new Date();

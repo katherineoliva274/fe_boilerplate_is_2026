@@ -5,8 +5,6 @@
   font-family: Inter, Arial, Helvetica, sans-serif;
 }
 
-/* ---------- Encabezado ---------- */
-
 .encabezado {
   height: 76px;
   background: #14233f;
@@ -29,8 +27,6 @@
   font-size: 17px;
   font-weight: 600;
 }
-
-/* ---------- Estructura y menú lateral ---------- */
 
 .estructura {
   display: flex;
@@ -78,8 +74,6 @@
   border-left: 4px solid #10978b;
   padding-left: 18px;
 }
-
-/* ---------- Contenido ---------- */
 
 .contenido {
   flex: 1;
@@ -138,8 +132,6 @@
   color: #6c7890;
 }
 
-/* ---------- Filtros ---------- */
-
 .filtros {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
@@ -197,8 +189,6 @@
   background: #e1e7ee;
 }
 
-/* ---------- Mensajes ---------- */
-
 .exito {
   margin-bottom: 24px;
   padding: 15px;
@@ -214,8 +204,6 @@
   font-size: 15px;
   color: #6c7890;
 }
-
-/* ---------- Vista semanal ---------- */
 
 .semana {
   display: grid;
@@ -332,8 +320,6 @@
   font-size: 12px;
   font-weight: 700;
 }
-
-/* ---------- Pantallas pequeñas ---------- */
 
 @media (max-width: 900px) {
   .filtros {
