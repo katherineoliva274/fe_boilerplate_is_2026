@@ -24,6 +24,8 @@ interface Ingreso {
   numero: string;
   nombre: string;
   fechaHora: string;
+  estadoMembresia: EstadoMembresia;
+  confirmacionEspecial: boolean;
 }
 
 const miembrosEjemplo: Miembro[] = [
@@ -109,6 +111,8 @@ export default function RegistroIngresosPage() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
   const [procesando, setProcesando] = useState(false);
+  const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
+
 
   const termino = busqueda.trim().toLowerCase();
 
@@ -129,60 +133,72 @@ export default function RegistroIngresosPage() {
     setError("");
   }
 
-  function registrarIngreso() {
-    if (!seleccionado) {
-      setError("Debes seleccionar un miembro.");
-      return;
-    }
+  
+function registrarIngreso() {
+  setError("");
+  setMensaje("");
 
-    setProcesando(true);
-    setError("");
-    setMensaje("");
-
-    // Demostración local. No envía datos al backend.
-    const fechaActual = obtenerFechaLocal();
-
-    const ingresoExistente = ingresos.some(
-      (ingreso) =>
-        ingreso.miembroId === seleccionado.id &&
-        new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/El_Salvador",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(new Date(ingreso.fechaHora)) === fechaActual
-    );
-
-    if (ingresoExistente) {
-      setError(
-        "Este miembro ya tiene un ingreso registrado hoy en la demostración."
-      );
-      setProcesando(false);
-      return;
-    }
-
-    // La validación de membresía y confirmación
-    // de ingreso especial se desarrollarán en H14.
-    const nuevoIngreso: Ingreso = {
-      id: Date.now(),
-      miembroId: seleccionado.id,
-      numero: seleccionado.numero,
-      nombre: seleccionado.nombre,
-      fechaHora: new Date().toISOString(),
-    };
-
-    setIngresos((anteriores) => [
-      nuevoIngreso,
-      ...anteriores,
-    ]);
-
-    setMensaje(
-      `Ingreso de ${seleccionado.nombre} registrado en la demostración.`
-    );
-
-    setSeleccionado(null);
-    setProcesando(false);
+  if (!seleccionado) {
+    setError("Debes seleccionar un miembro.");
+    return;
   }
+
+  const fechaActual = obtenerFechaLocal();
+
+  const ingresoExistente = ingresos.some((ingreso) => {
+    const fechaIngreso = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/El_Salvador",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(ingreso.fechaHora));
+
+    return (
+      ingreso.miembroId === seleccionado.id &&
+      fechaIngreso === fechaActual
+    );
+  });
+
+  if (ingresoExistente) {
+    setError("Este miembro ya tiene un ingreso registrado hoy.");
+    return;
+  }
+
+  if (seleccionado.estado !== "VIGENTE") {
+    setConfirmacionAbierta(true);
+    return;
+  }
+
+  guardarIngreso(false);
+}
+
+function guardarIngreso(confirmacionEspecial: boolean) {
+  if (!seleccionado) return;
+
+  setProcesando(true);
+
+  const nuevoIngreso: Ingreso = {
+    id: Date.now(),
+    miembroId: seleccionado.id,
+    numero: seleccionado.numero,
+    nombre: seleccionado.nombre,
+    fechaHora: new Date().toISOString(),
+    estadoMembresia: seleccionado.estado,
+    confirmacionEspecial,
+  };
+
+  setIngresos((anteriores) => [
+    nuevoIngreso,
+    ...anteriores,
+  ]);
+
+ setMensaje(`Ingreso de ${seleccionado.nombre} registrado.`);
+
+  setConfirmacionAbierta(false);
+  setSeleccionado(null);
+  setProcesando(false);
+}
+
 
   return (
     <div className={styles.contenedor}>
@@ -435,12 +451,69 @@ export default function RegistroIngresosPage() {
             )}
           </section>
 
-          <p className={styles.nota}>
-            PROTOTIPO VISUAL · Los ingresos son
-            temporales y no se guardan en la base de datos.
-          </p>
+        
         </main>
       </div>
+      
+{confirmacionAbierta && seleccionado && (
+  <div className={styles.modalFondo}>
+    <section
+      className={styles.modal}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tituloConfirmacion"
+    >
+      <div className={styles.iconoAdvertencia}>!</div>
+
+      <h3 id="tituloConfirmacion">
+        Confirmación de ingreso
+      </h3>
+
+      <p>
+        El miembro <strong>{seleccionado.nombre}</strong>{" "}
+presenta el siguiente estado:
+      </p>
+
+      <div className={styles.estadoAdvertencia}>
+        {seleccionado.estado === "VENCIDA"
+          ? "MEMBRESÍA VENCIDA"
+          : "SIN MEMBRESÍA"}
+      </div>
+
+      <p>
+        {seleccionado.estado === "VENCIDA"
+          ? `Fecha de vencimiento: ${formatearFecha(
+              seleccionado.vencimiento
+            )}`
+          : "Este miembro no tiene una membresía registrada."}
+      </p>
+
+      <p className={styles.preguntaConfirmacion}>
+        ¿Deseas registrar el ingreso de todas formas?
+      </p>
+
+      <div className={styles.accionesModal}>
+        <button
+          type="button"
+          className={styles.botonCancelar}
+          onClick={() => setConfirmacionAbierta(false)}
+        >
+          Cancelar
+        </button>
+
+        <button
+          type="button"
+          className={styles.botonPrincipal}
+          disabled={procesando}
+          onClick={() => guardarIngreso(true)}
+        >
+          Sí, registrar
+        </button>
+      </div>
+    </section>
+  </div>
+)}
+
     </div>
   );
 }

@@ -374,3 +374,95 @@
     width: 100%;
   }
 }
+
+
+/* Ventana de confirmación H14 */
+
+.modalFondo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e1e5ea;
+  border-radius: 14px;
+  padding: 35px;
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2);
+}
+
+.modal h3 {
+  font-size: 23px;
+  font-weight: 700;
+  color: #17243b;
+  margin: 15px 0 20px;
+}
+
+.modal p {
+  color: #586780;
+  font-size: 14px;
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.iconoAdvertencia {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #fff2c8;
+  color: #936300;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.estadoAdvertencia {
+  background: #ffe2e2;
+  color: #b32d36;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 16px 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.preguntaConfirmacion {
+  font-weight: 700;
+  color: #253653 !important;
+}
+
+.accionesModal {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+@media (max-width: 480px) {
+  .modal {
+    padding: 25px 18px;
+  }
+
+  .accionesModal {
+    flex-direction: column;
+  }
+
+  .accionesModal button {
+    width: 100%;
+  }
+}
+
