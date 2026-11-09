@@ -59,6 +59,8 @@ const salas = [
   "Sala de spinning",
   "Sala de entrenamiento grupal",
 ];
+
+
 const plantillas: PlantillaMock[] = [
   { dia: 0, hora: "06:00", clase: "Funcional", entrenador: "Laura Hernández", sala: "Sala funcional", duracion: 60, capacidad: 15, reservados: 9 },
   { dia: 0, hora: "23:30", clase: "Spinning nocturno", entrenador: "Diego Ramírez", sala: "Sala de spinning", duracion: 45, capacidad: 12, reservados: 5 },
@@ -104,6 +106,7 @@ function mismoDia(a: Date, b: Date): boolean {
     a.getDate() === b.getDate()
   );
 }
+
 function obtenerDias(hoy: Date): Date[] {
   return Array.from(
     { length: 7 },
@@ -153,6 +156,8 @@ function crearSesiones(hoy: Date, reservas: ReservaGuardada[]): Sesion[] {
     };
   });
 }
+
+
 function cuposLibres(sesion: Sesion): number {
   return Math.max(0, sesion.capacidad - sesion.reservados);
 }
@@ -170,44 +175,6 @@ function etiquetaCerrada(sesion: Sesion): string {
   if (sesion.estado === "CANCELADA") return "Cancelada";
   if (sesion.estado === "COMPLETADA") return "Completada";
   return "Iniciada";
-}
-
-function fin(sesion: Sesion): Date {
-  return new Date(sesion.inicio.getTime() + sesion.duracion * 60000);
-}
-
-function validarReserva(
-  sesion: Sesion,
-  reservas: ReservaGuardada[],
-  ahora: Date
-): string | null {
-  const confirmadas = reservas.filter((r) => r.status === "CONFIRMADA");
-
-  if (confirmadas.some((r) => r.sessionId === sesion.id)) {
-    return "Ya tienes una reserva para esta sesión";
-  }
-  if (sesion.estado !== "PROGRAMADA") {
-    return "La sesión no está disponible para reservar";
-  }
-  if (sesion.inicio <= ahora) {
-    return "La sesión ya inició";
-  }
-  if (cuposLibres(sesion) === 0) {
-    return "La sesión está llena";
-  }
-
-  const inicioA = sesion.inicio.getTime();
-  const finA = fin(sesion).getTime();
-  const seSolapa = confirmadas.some(
-    (r) =>
-      inicioA < new Date(r.endsAt).getTime() &&
-      finA > new Date(r.startsAt).getTime()
-  );
-  if (seSolapa) {
-    return "Tienes otra reserva confirmada que se solapa con este horario";
-  }
-
-  return null;
 }
 
 export default function ClasesSemanaPage() {
