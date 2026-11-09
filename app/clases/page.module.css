@@ -75,10 +75,11 @@
   padding-left: 18px;
 }
 
+
 .contenido {
   flex: 1;
   min-width: 0;
-  padding: 58px 40px 48px;
+  padding: 58px 50px 48px 40px;
 }
 
 .tituloSeccion {
@@ -127,9 +128,27 @@
   color: #14233f;
 }
 
+.encabezadoDerecha {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
 .rango {
   font-size: 13px;
   color: #6c7890;
+}
+
+.enlace {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0b7a6e;
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
 }
 
 .filtros {
@@ -321,6 +340,143 @@
   font-weight: 700;
 }
 
+.tarjetaConfirmar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 590px;
+  padding: 40px 28px;
+  background: white;
+  border: 1px solid #e1e7ef;
+  border-radius: 16px;
+}
+
+.confirmacion {
+  width: 100%;
+  max-width: 560px;
+  padding: 50px;
+  background: white;
+  border: 1px solid #e1e7ef;
+  border-radius: 16px;
+}
+
+.confirmacion h3 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #14233f;
+  margin-bottom: 26px;
+}
+
+.resumen {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin: 0 0 36px;
+  padding: 0 0 0 10px;
+  list-style: none;
+  font-size: 16px;
+  color: #4a586d;
+}
+
+.resumen li {
+  position: relative;
+  padding-left: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.resumen li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+}
+
+.resumen strong {
+  color: #17243b;
+  font-weight: 700;
+}
+
+.procesando,
+.exito,
+.error {
+  margin: -8px 0 24px;
+  padding: 14px 16px;
+  border-radius: 7px;
+  font-size: 14px;
+}
+
+.procesando {
+  background: #eef3f8;
+  color: #4a586d;
+}
+
+.exito {
+  background: #e2f7e9;
+  color: #13743a;
+  font-weight: 700;
+}
+
+.error {
+  background: #fff0f0;
+  color: #b32630;
+}
+
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-left: 10px;
+}
+
+.volver,
+.confirmar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  height: 48px;
+  padding: 0 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.volver {
+  width: 150px;
+  background: #e8ecf4;
+  border: 1px solid #e8ecf4;
+  color: #364559;
+}
+
+.volver:hover:not(:disabled) {
+  background: #dbe2ee;
+}
+
+.confirmar {
+  width: 190px;
+  background: #138f80;
+  border: 1px solid #138f80;
+  color: white;
+}
+
+.confirmar:hover:not(:disabled) {
+  background: #0b7a6e;
+}
+
+.volver:disabled,
+.confirmar:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.volver:focus-visible,
+.confirmar:focus-visible {
+  outline: 2px solid #10978b;
+  outline-offset: 2px;
+}
+
 @media (max-width: 900px) {
   .filtros {
     grid-template-columns: 1fr 1fr;
@@ -383,5 +539,23 @@
 
   .dia {
     min-height: 0;
+  }
+
+  .tarjetaConfirmar {
+    min-height: 0;
+    padding: 20px 12px;
+  }
+
+  .confirmacion {
+    padding: 28px 20px;
+  }
+
+  .acciones {
+    padding-left: 0;
+  }
+
+  .volver,
+  .confirmar {
+    width: 100%;
   }
 }

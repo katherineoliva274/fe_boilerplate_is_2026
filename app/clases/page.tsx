@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import styles from "./page.module.css";
 
@@ -28,6 +28,20 @@ interface PlantillaMock {
   capacidad: number;
   reservados: number;
 }
+
+interface ReservaGuardada {
+  id: string;
+  sessionId: string;
+  className: string;
+  trainerName: string;
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  status: "CONFIRMADA" | "CANCELADA" | "CANCELADA_POR_GIMNASIO";
+  createdAt: string;
+}
+
+const CLAVE_RESERVAS = "gkds_reservas_prototipo";
 
 const DIAS_SEMANA = [
   "Domingo",
@@ -100,11 +114,31 @@ function obtenerDias(hoy: Date): Date[] {
   );
 }
 
-function crearSesiones(hoy: Date): Sesion[] {
+function leerReservas(): ReservaGuardada[] {
+  try {
+    const crudo = window.sessionStorage.getItem(CLAVE_RESERVAS);
+    return crudo ? (JSON.parse(crudo) as ReservaGuardada[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function guardarReservas(reservas: ReservaGuardada[]) {
+  window.sessionStorage.setItem(CLAVE_RESERVAS, JSON.stringify(reservas));
+}
+
+function crearSesiones(hoy: Date, reservas: ReservaGuardada[]): Sesion[] {
+  const claveDia = `${hoy.getFullYear()}${dosDigitos(hoy.getMonth() + 1)}${dosDigitos(hoy.getDate())}`;
+
   return plantillas.map((p, i) => {
     const [hora, minuto] = p.hora.split(":").map(Number);
+    const id = `${claveDia}-${i + 1}`;
+    const propias = reservas.filter(
+      (r) => r.sessionId === id && r.status === "CONFIRMADA"
+    ).length;
+
     return {
-      id: `sesion-${i + 1}`,
+      id,
       clase: p.clase,
       entrenador: p.entrenador,
       sala: p.sala,
@@ -117,7 +151,7 @@ function crearSesiones(hoy: Date): Sesion[] {
       ),
       duracion: p.duracion,
       capacidad: p.capacidad,
-      reservados: p.reservados,
+      reservados: p.reservados + propias,
       estado: "PROGRAMADA",
     };
   });
@@ -149,19 +183,26 @@ export default function ClasesSemanaPage() {
   const [nombre, setNombre] = useState("");
   const [entrenador, setEntrenador] = useState("");
   const [sala, setSala] = useState("");
-  const [mensaje, setMensaje] = useState("");
 
+  // Confirmación de reserva (H5)
+  const [seleccionId, setSeleccionId] = useState<string | null>(null);
+  const [procesando, setProcesando] = useState(false);
+  const [errorReserva, setErrorReserva] = useState("");
+  const [reservaOk, setReservaOk] = useState(false);
+
+  // Simula la carga desde GET /api/class-sessions.
   useEffect(() => {
     const temporizador = setTimeout(() => {
       const ahora = new Date();
       setHoy(ahora);
-      setSesiones(crearSesiones(ahora));
+      setSesiones(crearSesiones(ahora, leerReservas()));
     }, 400);
 
     return () => clearTimeout(temporizador);
   }, []);
 
   const dias = hoy ? obtenerDias(hoy) : [];
+  const seleccion = sesiones?.find((s) => s.id === seleccionId) ?? null;
 
   const texto = nombre.trim().toLowerCase();
   const filtradas = (sesiones ?? [])
@@ -177,13 +218,67 @@ export default function ClasesSemanaPage() {
     setNombre("");
     setEntrenador("");
     setSala("");
-    setMensaje("");
   }
 
-  function reservar(sesion: Sesion) {
-    setMensaje(
-      `Reserva de «${sesion.clase}» el ${mostrarFecha(sesion.inicio)} a las ${mostrarHora(sesion.inicio)}: pendiente de conexión con el backend (H5).`
-    );
+  function abrirConfirmacion(sesion: Sesion) {
+    setErrorReserva("");
+    setReservaOk(false);
+    setSeleccionId(sesion.id);
+  }
+
+  function volver() {
+    if (procesando) return;
+    setSeleccionId(null);
+    setErrorReserva("");
+    setReservaOk(false);
+  }
+
+  async function confirmar(evento: FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+    if (!seleccion || procesando || reservaOk) return;
+
+    setProcesando(true);
+    setErrorReserva("");
+
+    try {
+      await new Promise((resolver) => setTimeout(resolver, 700));
+
+      const guardadas = leerReservas();
+      const motivo = validarReserva(seleccion, guardadas, new Date());
+      if (motivo) {
+        setErrorReserva(motivo);
+        return;
+      }
+
+      const ahora = new Date();
+      guardarReservas([
+        ...guardadas,
+        {
+          id: `reserva-${ahora.getTime()}`,
+          sessionId: seleccion.id,
+          className: seleccion.clase,
+          trainerName: seleccion.entrenador,
+          roomName: seleccion.sala,
+          startsAt: seleccion.inicio.toISOString(),
+          endsAt: fin(seleccion).toISOString(),
+          status: "CONFIRMADA",
+          createdAt: ahora.toISOString(),
+        },
+      ]);
+
+      setSesiones((actuales) =>
+        actuales
+          ? actuales.map((s) =>
+              s.id === seleccion.id ? { ...s, reservados: s.reservados + 1 } : s
+            )
+          : actuales
+      );
+      setReservaOk(true);
+    } catch {
+      setErrorReserva("No fue posible reservar. Reintenta");
+    } finally {
+      setProcesando(false);
+    }
   }
 
   return (
@@ -215,184 +310,262 @@ export default function ClasesSemanaPage() {
         </aside>
 
         <main className={styles.contenido}>
-          <div className={styles.tituloSeccion}>
-            <h2>Clases de la semana</h2>
-            <span className={styles.etiqueta}>PROTOTIPO</span>
-          </div>
-
-          <section className={styles.tarjeta}>
-            <div className={styles.tarjetaEncabezado}>
-              <h3>Vista semanal</h3>
-              {hoy && (
-                <span className={styles.rango}>
-                  {mostrarFecha(dias[0])} – {mostrarFecha(dias[6])}
-                </span>
-              )}
-            </div>
-
-            <div className={styles.filtros}>
-              <div className={styles.campo}>
-                <label htmlFor="nombre">Clase</label>
-                <input
-                  id="nombre"
-                  value={nombre}
-                  maxLength={80}
-                  placeholder="Buscar por nombre"
-                  onChange={(e) => {
-                    setNombre(e.target.value);
-                    setMensaje("");
-                  }}
-                />
+          {seleccion ? (
+            <>
+              <div className={styles.tituloSeccion}>
+                <h2>Confirmar reserva grupal</h2>
+                <span className={styles.etiqueta}>PROTOTIPO</span>
               </div>
 
-              <div className={styles.campo}>
-                <label htmlFor="entrenador">Entrenador</label>
-                <select
-                  id="entrenador"
-                  value={entrenador}
-                  onChange={(e) => {
-                    setEntrenador(e.target.value);
-                    setMensaje("");
-                  }}
-                >
-                  <option value="">Todos</option>
-                  {entrenadores.map((e) => (
-                    <option value={e} key={e}>
-                      {e}
-                    </option>
-                  ))}
-                </select>
+              <section className={styles.tarjetaConfirmar}>
+                <form className={styles.confirmacion} onSubmit={confirmar}>
+                  <input type="hidden" name="sessionId" value={seleccion.id} />
+
+                  <h3>Confirmar operación</h3>
+
+                  <ul className={styles.resumen}>
+                    <li>
+                      Clase: <strong>{seleccion.clase}</strong>
+                    </li>
+                    <li>
+                      Fecha y hora de sesión:{" "}
+                      <strong>
+                        {mostrarFecha(seleccion.inicio)} ·{" "}
+                        {mostrarHora(seleccion.inicio)} –{" "}
+                        {mostrarHora(fin(seleccion))}
+                      </strong>
+                    </li>
+                    <li>
+                      Sala y entrenador:{" "}
+                      <strong>
+                        {seleccion.sala} · {seleccion.entrenador}
+                      </strong>
+                    </li>
+                    <li>
+                      Cupos disponibles:{" "}
+                      <strong>{cuposLibres(seleccion)}</strong>
+                    </li>
+                  </ul>
+
+                  {procesando && (
+                    <p role="status" className={styles.procesando}>
+                      Procesando reserva...
+                    </p>
+                  )}
+                  {reservaOk && (
+                    <p role="status" className={styles.exito}>
+                      Reserva confirmada
+                    </p>
+                  )}
+                  {errorReserva && (
+                    <p role="alert" className={styles.error}>
+                      {errorReserva}
+                    </p>
+                  )}
+
+                  <div className={styles.acciones}>
+                    <button
+                      type="button"
+                      className={styles.volver}
+                      onClick={volver}
+                      disabled={procesando}
+                    >
+                      Volver
+                    </button>
+
+                    {reservaOk ? (
+                      <Link href="/mis-reservas" className={styles.confirmar}>
+                        Mis reservas
+                      </Link>
+                    ) : (
+                      <button
+                        type="submit"
+                        className={styles.confirmar}
+                        disabled={procesando}
+                      >
+                        Confirmar
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </section>
+            </>
+          ) : (
+            <>
+              <div className={styles.tituloSeccion}>
+                <h2>Clases de la semana</h2>
+                <span className={styles.etiqueta}>PROTOTIPO</span>
               </div>
 
-              <div className={styles.campo}>
-                <label htmlFor="sala">Sala</label>
-                <select
-                  id="sala"
-                  value={sala}
-                  onChange={(e) => {
-                    setSala(e.target.value);
-                    setMensaje("");
-                  }}
-                >
-                  <option value="">Todas</option>
-                  {salas.map((s) => (
-                    <option value={s} key={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <section className={styles.tarjeta}>
+                <div className={styles.tarjetaEncabezado}>
+                  <h3>Vista semanal</h3>
+                  <div className={styles.encabezadoDerecha}>
+                    {hoy && (
+                      <span className={styles.rango}>
+                        {mostrarFecha(dias[0])} – {mostrarFecha(dias[6])}
+                      </span>
+                    )}
+                    <Link href="/mis-reservas" className={styles.enlace}>
+                      Mis reservas
+                    </Link>
+                  </div>
+                </div>
 
-              <button
-                type="button"
-                className={styles.limpiar}
-                onClick={limpiarFiltros}
-              >
-                Limpiar
-              </button>
-            </div>
+                <div className={styles.filtros}>
+                  <div className={styles.campo}>
+                    <label htmlFor="nombre">Clase</label>
+                    <input
+                      id="nombre"
+                      value={nombre}
+                      maxLength={80}
+                      placeholder="Buscar por nombre"
+                      onChange={(e) => setNombre(e.target.value)}
+                    />
+                  </div>
 
-            {mensaje && (
-              <div role="status" className={styles.exito}>
-                {mensaje}
-              </div>
-            )}
+                  <div className={styles.campo}>
+                    <label htmlFor="entrenador">Entrenador</label>
+                    <select
+                      id="entrenador"
+                      value={entrenador}
+                      onChange={(e) => setEntrenador(e.target.value)}
+                    >
+                      <option value="">Todos</option>
+                      {entrenadores.map((e) => (
+                        <option value={e} key={e}>
+                          {e}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-            {sesiones === null || hoy === null ? (
-              <p role="status" className={styles.estado}>
-                Cargando sesiones...
-              </p>
-            ) : filtradas.length === 0 ? (
-              <p role="status" className={styles.estado}>
-                No hay sesiones disponibles para estos filtros
-              </p>
-            ) : (
-              <div className={styles.semana}>
-                {dias.map((dia, indice) => {
-                  const delDia = filtradas.filter((s) =>
-                    mismoDia(s.inicio, dia)
-                  );
+                  <div className={styles.campo}>
+                    <label htmlFor="sala">Sala</label>
+                    <select
+                      id="sala"
+                      value={sala}
+                      onChange={(e) => setSala(e.target.value)}
+                    >
+                      <option value="">Todas</option>
+                      {salas.map((s) => (
+                        <option value={s} key={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                  return (
-                    <div className={styles.dia} key={indice}>
-                      <div className={styles.diaEncabezado}>
-                        <strong>{DIAS_SEMANA[dia.getDay()]}</strong>
-                        <span>
-                          {indice === 0
-                            ? "Hoy"
-                            : `${dosDigitos(dia.getDate())}/${dosDigitos(dia.getMonth() + 1)}`}
-                        </span>
-                      </div>
+                  <button
+                    type="button"
+                    className={styles.limpiar}
+                    onClick={limpiarFiltros}
+                  >
+                    Limpiar
+                  </button>
+                </div>
 
-                      {delDia.length === 0 ? (
-                        <p className={styles.sinSesiones}>Sin sesiones</p>
-                      ) : (
-                        delDia.map((sesion) => {
-                          const disponibilidad = obtenerDisponibilidad(
-                            sesion,
-                            hoy
-                          );
-                          const libres = cuposLibres(sesion);
+                {sesiones === null || hoy === null ? (
+                  <p role="status" className={styles.estado}>
+                    Cargando sesiones...
+                  </p>
+                ) : filtradas.length === 0 ? (
+                  <p role="status" className={styles.estado}>
+                    No hay sesiones disponibles para estos filtros
+                  </p>
+                ) : (
+                  <div className={styles.semana}>
+                    {dias.map((dia, indice) => {
+                      const delDia = filtradas.filter((s) =>
+                        mismoDia(s.inicio, dia)
+                      );
 
-                          const claseBloque =
-                            disponibilidad === "DISPONIBLE"
-                              ? styles.disponible
-                              : disponibilidad === "LLENA"
-                                ? styles.llena
-                                : styles.cerrada;
+                      return (
+                        <div className={styles.dia} key={indice}>
+                          <div className={styles.diaEncabezado}>
+                            <strong>{DIAS_SEMANA[dia.getDay()]}</strong>
+                            <span>
+                              {indice === 0
+                                ? "Hoy"
+                                : `${dosDigitos(dia.getDate())}/${dosDigitos(dia.getMonth() + 1)}`}
+                            </span>
+                          </div>
 
-                          return (
-                            <article
-                              className={`${styles.sesion} ${claseBloque}`}
-                              key={sesion.id}
-                            >
-                              <div className={styles.sesionHora}>
-                                <strong>{mostrarHora(sesion.inicio)}</strong>
-                                <span>{sesion.duracion} min</span>
-                              </div>
-                              <p className={styles.sesionClase}>
-                                {sesion.clase}
-                              </p>
-                              <p className={styles.sesionDetalle}>
-                                {sesion.entrenador}
-                              </p>
-                              <p className={styles.sesionDetalle}>
-                                {sesion.sala}
-                              </p>
-                              <p className={styles.sesionDetalle}>
-                                Cupo máx.: {sesion.capacidad}
-                              </p>
-                              <p className={styles.sesionDetalle}>
-                                Libres: {libres}
-                              </p>
+                          {delDia.length === 0 ? (
+                            <p className={styles.sinSesiones}>Sin sesiones</p>
+                          ) : (
+                            delDia.map((sesion) => {
+                              const disponibilidad = obtenerDisponibilidad(
+                                sesion,
+                                hoy
+                              );
+                              const libres = cuposLibres(sesion);
 
-                              {disponibilidad === "DISPONIBLE" && (
-                                <button
-                                  type="button"
-                                  className={styles.reservar}
-                                  onClick={() => reservar(sesion)}
+                              const claseBloque =
+                                disponibilidad === "DISPONIBLE"
+                                  ? styles.disponible
+                                  : disponibilidad === "LLENA"
+                                    ? styles.llena
+                                    : styles.cerrada;
+
+                              return (
+                                <article
+                                  className={`${styles.sesion} ${claseBloque}`}
+                                  key={sesion.id}
                                 >
-                                  Reservar
-                                </button>
-                              )}
-                              {disponibilidad === "LLENA" && (
-                                <span className={styles.insignia}>Llena</span>
-                              )}
-                              {disponibilidad === "CERRADA" && (
-                                <span className={styles.insignia}>
-                                  {etiquetaCerrada(sesion)}
-                                </span>
-                              )}
-                            </article>
-                          );
-                        })
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                                  <div className={styles.sesionHora}>
+                                    <strong>
+                                      {mostrarHora(sesion.inicio)}
+                                    </strong>
+                                    <span>{sesion.duracion} min</span>
+                                  </div>
+                                  <p className={styles.sesionClase}>
+                                    {sesion.clase}
+                                  </p>
+                                  <p className={styles.sesionDetalle}>
+                                    {sesion.entrenador}
+                                  </p>
+                                  <p className={styles.sesionDetalle}>
+                                    {sesion.sala}
+                                  </p>
+                                  <p className={styles.sesionDetalle}>
+                                    Cupo máx.: {sesion.capacidad}
+                                  </p>
+                                  <p className={styles.sesionDetalle}>
+                                    Libres: {libres}
+                                  </p>
+
+                                  {disponibilidad === "DISPONIBLE" && (
+                                    <button
+                                      type="button"
+                                      className={styles.reservar}
+                                      onClick={() => abrirConfirmacion(sesion)}
+                                    >
+                                      Reservar
+                                    </button>
+                                  )}
+                                  {disponibilidad === "LLENA" && (
+                                    <span className={styles.insignia}>
+                                      Llena
+                                    </span>
+                                  )}
+                                  {disponibilidad === "CERRADA" && (
+                                    <span className={styles.insignia}>
+                                      {etiquetaCerrada(sesion)}
+                                    </span>
+                                  )}
+                                </article>
+                              );
+                            })
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
