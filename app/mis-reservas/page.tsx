@@ -41,6 +41,8 @@ interface PlantillaMock {
 
 const CLAVE_RESERVAS = "gkds_reservas_prototipo";
 const TAMANO_PAGINA = 10;
+const HORAS_MINIMAS_CANCELACION = 12;
+const CLAVE_CANCELACIONES_EJEMPLO = "gkds_cancelaciones_ejemplo_h6";
 
 const ESTADOS: { valor: EstadoReserva; etiqueta: string }[] = [
   { valor: "CONFIRMADA", etiqueta: "CONFIRMADA" },
@@ -97,8 +99,20 @@ function leerReservasGuardadas(): ReservaGuardada[] {
   }
 }
 
+// Los datos de ejemplo se mantienen en esta sesión, incluso si recargamos la página.
+function leerCancelacionesEjemplo(): string[] {
+  try {
+    const crudo = window.sessionStorage.getItem(CLAVE_CANCELACIONES_EJEMPLO);
+    const datos: unknown = crudo ? JSON.parse(crudo) : [];
+    return Array.isArray(datos) ? datos.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 // Reservas de ejemplo + las que se crearon en /clases durante esta sesión.
 function cargarReservas(hoy: Date): Reserva[] {
+  const canceladas = new Set(leerCancelacionesEjemplo());
   const deEjemplo: Reserva[] = plantillas.map((p, i) => {
     const [hora, minuto] = p.hora.split(":").map(Number);
     const inicio = new Date(
@@ -115,7 +129,7 @@ function cargarReservas(hoy: Date): Reserva[] {
       sala: p.sala,
       inicio,
       fin: new Date(inicio.getTime() + p.duracion * 60000),
-      estado: p.estado,
+      estado: canceladas.has(`ejemplo-${i + 1}`) ? "CANCELADA" : p.estado,
     };
   });
 
@@ -132,6 +146,12 @@ function cargarReservas(hoy: Date): Reserva[] {
   return [...deEjemplo, ...nuevas];
 }
 
+function puedeCancelar(reserva: Reserva, ahora: Date): boolean {
+  const milisegundosRestantes = reserva.inicio.getTime() - ahora.getTime();
+  return reserva.estado === "CONFIRMADA" &&
+    milisegundosRestantes >= HORAS_MINIMAS_CANCELACION * 60 * 60 * 1000;
+}
+
 function etiquetaEstado(estado: EstadoReserva): string {
   return ESTADOS.find((e) => e.valor === estado)?.etiqueta ?? estado;
 }
@@ -146,14 +166,26 @@ export default function MisReservasPage() {
   const [reservas, setReservas] = useState<Reserva[] | null>(null);
   const [estado, setEstado] = useState<"" | EstadoReserva>("");
   const [pagina, setPagina] = useState(1);
+  const [reservaSeleccionada, setReservaSeleccionada] = useState<Reserva | null>(null);
+  const [procesando, setProcesando] = useState(false);
+  const [error, setError] = useState("");
+  const [exito, setExito] = useState("");
+  const [ahora, setAhora] = useState<Date | null>(null);
 
   // Simula la carga desde GET /api/class-reservations/me.
   useEffect(() => {
     const temporizador = setTimeout(() => {
-      setReservas(cargarReservas(new Date()));
+      const fechaActual = new Date();
+      setAhora(fechaActual);
+      setReservas(cargarReservas(fechaActual));
     }, 400);
 
-    return () => clearTimeout(temporizador);
+    // Actualizamos el reloj para evitar que una reserva vencida siga habilitada.
+    const reloj = setInterval(() => setAhora(new Date()), 60_000);
+    return () => {
+      clearTimeout(temporizador);
+      clearInterval(reloj);
+    };
   }, []);
 
   // Fecha de inicio descendente (la más reciente primero).
@@ -172,6 +204,75 @@ export default function MisReservasPage() {
   function cambiarEstado(valor: string) {
     setEstado(valor as "" | EstadoReserva);
     setPagina(1);
+  }
+
+  function abrirCancelacion(reserva: Reserva) {
+    setError("");
+    setExito("");
+    setAhora(new Date());
+    setReservaSeleccionada(reserva);
+  }
+
+  function cerrarCancelacion() {
+    if (procesando) return;
+    setReservaSeleccionada(null);
+    setError("");
+  }
+
+  async function confirmarCancelacion() {
+    if (!reservaSeleccionada || procesando) return;
+    const seleccion = reservaSeleccionada;
+    setError("");
+    setExito("");
+    setProcesando(true);
+
+    try {
+      // Prototipo: H6 utilizará DELETE /api/class-reservations/:id al integrar el backend.
+      await new Promise<void>((resolver) => setTimeout(resolver, 450));
+      const fechaActual = new Date();
+      setAhora(fechaActual);
+      if (seleccion.estado !== "CONFIRMADA") {
+        setError("La reserva ya está cancelada");
+        return;
+      }
+      if (!puedeCancelar(seleccion, fechaActual)) {
+        setError("La reserva solo puede cancelarse hasta 12 horas antes");
+        return;
+      }
+
+      if (seleccion.id.startsWith("ejemplo-")) {
+        const ids = new Set(leerCancelacionesEjemplo());
+        ids.add(seleccion.id);
+        window.sessionStorage.setItem(CLAVE_CANCELACIONES_EJEMPLO, JSON.stringify([...ids]));
+      } else {
+        const guardadas = leerReservasGuardadas();
+        const indice = guardadas.findIndex((r) => r.id === seleccion.id);
+        if (indice === -1) {
+          setError("No fue posible cancelar la reserva");
+          return;
+        }
+        if (guardadas[indice].status !== "CONFIRMADA") {
+          setError("La reserva ya está cancelada");
+          return;
+        }
+        const actualizadas = guardadas.map((r) =>
+          r.id === seleccion.id ? { ...r, status: "CANCELADA" as EstadoReserva } : r
+        );
+        window.sessionStorage.setItem(CLAVE_RESERVAS, JSON.stringify(actualizadas));
+      }
+
+      setReservas((anteriores) =>
+        anteriores?.map((r) =>
+          r.id === seleccion.id ? { ...r, estado: "CANCELADA" } : r
+        ) ?? null
+      );
+      setReservaSeleccionada(null);
+      setExito("Reserva cancelada. El cupo ha sido liberado.");
+    } catch {
+      setError("No fue posible cancelar la reserva");
+    } finally {
+      setProcesando(false);
+    }
   }
 
   return (
@@ -207,6 +308,13 @@ export default function MisReservasPage() {
             <h2>Mis reservas</h2>
             <span className={styles.etiqueta}>PROTOTIPO</span>
           </div>
+
+          {exito && (
+            <p role="status" className={styles.avisoExito}>{exito}</p>
+          )}
+          {error && !reservaSeleccionada && (
+            <p role="alert" className={styles.avisoError}>{error}</p>
+          )}
 
           <section className={styles.tarjeta}>
             <div className={styles.tarjetaEncabezado}>
@@ -275,8 +383,19 @@ export default function MisReservasPage() {
                               {etiquetaEstado(reserva.estado)}
                             </span>
                           </td>
-                          {/* La acción Cancelar se agrega en H6. */}
-                          <td className={styles.accion}>—</td>
+                          <td className={styles.accion}>
+                            {ahora && puedeCancelar(reserva, ahora) ? (
+                              <button
+                                type="button"
+                                className={styles.botonCancelar}
+                                onClick={() => abrirCancelacion(reserva)}
+                              >
+                                Cancelar
+                              </button>
+                            ) : (
+                              <span className={styles.sinAccion}>—</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -310,6 +429,45 @@ export default function MisReservasPage() {
               </>
             )}
           </section>
+
+          {reservaSeleccionada && (
+            <div className={styles.modalFondo}>
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="tituloCancelarReserva"
+                aria-describedby="descripcionCancelarReserva"
+                className={styles.modal}
+              >
+                <h3 id="tituloCancelarReserva">Cancelar reserva</h3>
+                <p id="descripcionCancelarReserva">
+                  ¿Deseas cancelar tu reserva de <strong>{reservaSeleccionada.clase}</strong>
+                  {" "}del {mostrarFecha(reservaSeleccionada.inicio)} a las {mostrarHora(reservaSeleccionada.inicio)}?
+                </p>
+                <p className={styles.avisoModal}>Solo puedes cancelarla hasta 12 horas antes de la sesión.</p>
+                {error && <p role="alert" className={styles.avisoError}>{error}</p>}
+                <div className={styles.modalBotones}>
+                  <button
+                    type="button"
+                    className={styles.botonVolver}
+                    onClick={cerrarCancelacion}
+                    disabled={procesando}
+                  >
+                    Volver
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.botonConfirmar}
+                    onClick={confirmarCancelacion}
+                    disabled={procesando}
+                    autoFocus
+                  >
+                    {procesando ? "Cancelando..." : "Sí, cancelar"}
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
         </main>
       </div>
     </div>
