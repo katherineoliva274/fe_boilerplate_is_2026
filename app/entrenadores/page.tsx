@@ -43,7 +43,7 @@ export default function EntrenadoresPage() {
   const [page, setPage] = useState(1);
   const slots = useMemo(() => makeSlots(), []);
   useEffect(() => { const timeout = setTimeout(() => { setSessions(readSessions()); setLoading(false); }, 350); return () => clearTimeout(timeout); }, []);
-  const available = slots.filter(s => s.trainerId === trainerId && new Date(s.startsAt).getTime() > Date.now() && !sessions.some(r => r.slotId === s.id));
+  const available = slots.filter(s => s.trainerId === trainerId && new Date(s.startsAt).getTime() > Date.now() && !sessions.some(r => r.slotId === s.id && r.status === "CONFIRMADA"));
   const totalPages = Math.max(1, Math.ceil(available.length / 6));
   const shown = available.slice((Math.min(page, totalPages) - 1) * 6, Math.min(page, totalPages) * 6);
   const trainer = trainers.find(t => t.id === trainerId)!;
@@ -57,8 +57,15 @@ export default function EntrenadoresPage() {
         const start = new Date(selected.startsAt).getTime();
         const end = new Date(selected.endsAt).getTime();
         if (start <= Date.now()) throw new Error("Este horario ya no está disponible.");
-        if (current.some(r => r.slotId === selected.id)) throw new Error("Ya tienes una reserva para este horario.");
-        if (current.some(r => new Date(r.startsAt).getTime() < end && new Date(r.endsAt).getTime() > start)) throw new Error("Ya tienes una sesión en ese horario.");
+        if (current.some(r => r.slotId === selected.id && r.status === "CONFIRMADA"))
+  throw new Error("Ya tienes una reserva para este horario.");
+       if (current.some(r =>
+  r.status === "CONFIRMADA" &&
+  new Date(r.startsAt).getTime() < end &&
+  new Date(r.endsAt).getTime() > start
+)) {
+  throw new Error("Ya tienes una sesión en ese horario.");
+}
         const booking: PersonalSession = {
           id: `h10-${Date.now()}`, slotId: selected.id, trainerId: selected.trainerId,
           trainerName: trainers.find(t => t.id === selected.trainerId)?.name ?? "Entrenador",
