@@ -23,7 +23,9 @@ export default function MiProgresoPage() {
     return <div className={styles.layout}>
         <header className={styles.header}><h1>GKDS <span>FITNESS</span></h1></header>
         <div className={styles.body}>
-            <aside className={styles.sidebar}><p>MENÚ PRINCIPAL</p><nav><Link href="/">Inicio</Link><Link href="/mi-rutina">Mi rutina</Link><Link className={styles.active} href="/mi-progreso">Mi progreso</Link><Link href="/entrenadores">Entrenadores</Link><Link href="/pagos">Pagos</Link></nav></aside>
+            <aside className={styles.sidebar}><p>MENÚ PRINCIPAL</p><nav><Link href="/">Inicio</Link><Link href="/mi-rutina">Mi rutina</Link><Link className={styles.active} href="/mi-progreso">Mi progreso</Link><Link href="/mi-progreso/evolucion">
+  Mi evolución
+</Link><Link href="/entrenadores">Entrenadores</Link><Link href="/pagos">Pagos</Link></nav></aside>
             <main className={styles.main}>
                 <div className={styles.titleRow}><div><p className={styles.eyebrow}>SEGUIMIENTO PERSONAL</p><h2>Mi progreso físico</h2><p>Registra tus mediciones y revisa cómo has evolucionado.</p></div><span className={styles.tag}>PROTOTIPO</span></div>
                 <div className={styles.summaryGrid}>
