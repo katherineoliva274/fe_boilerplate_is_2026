@@ -1,62 +1,15 @@
-
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { backendServerFetch } from "@/lib/backend-server";
 
-type UserRole = "RECEPCION_ADMIN" | "ENTRENADOR" | "MIEMBRO";
+type AuthenticatedUser = { role: "RECEPCION_ADMIN" | "ENTRENADOR" | "MIEMBRO"; isActive: boolean };
 
 export default async function Home() {
-  const token = await getSession();
-
-  if (!token) {
-    redirect("/login");
-  }
-
-  const apiUrl = process.env.API_URL;
-
-  if (!apiUrl) {
-    throw new Error("Falta configurar API_URL.");
-  }
-
-  let role: UserRole;
-
-  try {
-    const response = await fetch(
-      new URL("auth/me", apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`),
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      },
-    );
-
-    if (!response.ok) {
-      redirect("/login");
-    }
-
-    const user = await response.json();
-
-    if (!user.isActive) {
-      redirect("/login");
-    }
-
-    role = user.role;
-  } catch (error) {
-    // Las redirecciones de Next.js deben ejecutarse fuera del catch.
-    throw error;
-  }
-
-  switch (role) {
-    case "RECEPCION_ADMIN":
-      redirect("/admin");
-
-    case "ENTRENADOR":
-      redirect("/entrenador");
-
-    case "MIEMBRO":
-      redirect("/mi-membresia");
-
-    default:
-      redirect("/login");
-  }
+  const response = await backendServerFetch("auth/me");
+  if (!response.ok) redirect("/login");
+  const user = await response.json() as AuthenticatedUser;
+  if (!user.isActive) redirect("/login");
+  if (user.role === "RECEPCION_ADMIN") redirect("/admin");
+  if (user.role === "ENTRENADOR") redirect("/entrenador");
+  if (user.role === "MIEMBRO") redirect("/mi-membresia");
+  redirect("/login");
 }

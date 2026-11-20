@@ -1,520 +1,120 @@
-
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { BackendRequestError, backendRequest } from "@/lib/backend-client";
 import styles from "./page.module.css";
 
-type EstadoMaquina =
-  | "DISPONIBLE"
-  | "EN_MANTENIMIENTO"
-  | "FUERA_SERVICIO";
-
-interface Maquina {
-  id: number;
-  nombre: string;
-  ubicacion: string;
-}
-
-interface Mantenimiento {
-  id: number;
-  maquinaId: number;
-  estado: EstadoMaquina;
-  motivo: string;
-  fechaInicio: string;
-  fechaFin: string;
-  responsable: string;
-}
-
-type Formulario = Omit<Mantenimiento, "id">;
-
-const maquinas: Maquina[] = [
-  { id: 1, nombre: "Caminadora", ubicacion: "Cardio" },
-  { id: 2, nombre: "Bicicleta estática", ubicacion: "Cardio" },
-  { id: 3, nombre: "Prensa de piernas", ubicacion: "Musculación" },
-  { id: 4, nombre: "Máquina de poleas", ubicacion: "Musculación" },
-  { id: 5, nombre: "Elíptica", ubicacion: "Cardio" },
-];
-
-const mantenimientosIniciales: Mantenimiento[] = [
-  {
-    id: 1,
-    maquinaId: 2,
-    estado: "EN_MANTENIMIENTO",
-    motivo: "Revisión de resistencia y pedales",
-    fechaInicio: "2026-11-05",
-    fechaFin: "",
-    responsable: "Personal de mantenimiento",
-  },
-  {
-    id: 2,
-    maquinaId: 3,
-    estado: "FUERA_SERVICIO",
-    motivo: "Falla en el sistema de carga",
-    fechaInicio: "2026-11-04",
-    fechaFin: "",
-    responsable: "Personal de mantenimiento",
-  },
-];
-
-const formularioVacio: Formulario = {
-  maquinaId: 0,
-  estado: "EN_MANTENIMIENTO",
-  motivo: "",
-  fechaInicio: "",
-  fechaFin: "",
-  responsable: "",
-};
-
-const menu = [
-  { nombre: "Inicio", ruta: "/" },
-  { nombre: "Membresías", ruta: "/admin/membresias" },
-  { nombre: "Clases y reservas", ruta: "/clases" },
-  { nombre: "Entrenadores", ruta: "/entrenadores" },
-  { nombre: "Pagos", ruta: "/pagos" },
-  { nombre: "Máquinas", ruta: "/admin/mantenimiento" },
-  { nombre: "Notificaciones", ruta: "/notificaciones" },
-  { nombre: "Reportes", ruta: "/reportes" },
-];
-
-function nombreEstado(estado: EstadoMaquina) {
-  switch (estado) {
-    case "DISPONIBLE":
-      return "Disponible";
-    case "EN_MANTENIMIENTO":
-      return "En mantenimiento";
-    case "FUERA_SERVICIO":
-      return "Fuera de servicio";
+type Status = "DISPONIBLE" | "EN_MANTENIMIENTO" | "FUERA_SERVICIO";
+type Machine = { id: string; name: string; type: string; location: string; status: Status; updatedAt: string };
+type ListResponse<T> = { data: T[]; total: number; page: number; pageSize: number };
+type Maintenance = { id: string; machineId: string; reason: string; startedAt: string; endedAt: string | null; createdById: string; closedById: string | null; createdAt: string };
+type Mode = "open" | "close" | "status";
+const statusNames: Record<Status, string> = { DISPONIBLE: "Disponible", EN_MANTENIMIENTO: "En mantenimiento", FUERA_SERVICIO: "Fuera de servicio" };
+function dateTime(value: string | null) { if (!value) return "—"; return new Intl.DateTimeFormat("es", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function localDateTimeNow() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
+function isoDateTime(value: string) { return new Date(value).toISOString(); }
+function explainError(error: unknown) {
+  if (error instanceof BackendRequestError) {
+    if (error.status === 409) return "Conflicto: ya existe un mantenimiento abierto o la transición solicitada no está permitida.";
+    if (error.status === 404) return "No se encontró la máquina o el mantenimiento solicitado.";
+    if (error.status === 400) return error.message || "Revisa los datos y la fecha indicados.";
+    if (error.status === 401 || error.status === 403) return "No tienes permiso para realizar esta acción. Verifica tu sesión.";
+    return error.message;
   }
+  return "No se pudo completar la solicitud. Inténtalo de nuevo.";
 }
-
-function mostrarFecha(fecha: string) {
-  if (!fecha) return "Pendiente";
-  const [anio, mes, dia] = fecha.split("-");
-  return `${dia}/${mes}/${anio}`;
-}
-
 export default function MantenimientoPage() {
-  const [registros, setRegistros] = useState(
-    mantenimientosIniciales
-  );
-  const [formulario, setFormulario] =
-    useState<Formulario>(formularioVacio);
-  const [editandoId, setEditandoId] =
-    useState<number | null>(null);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | Status>("");
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [selected, setSelected] = useState<Machine | null>(null);
+  const [reason, setReason] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [endedAt, setEndedAt] = useState("");
+  const [targetStatus, setTargetStatus] = useState<"DISPONIBLE" | "FUERA_SERVICIO">("FUERA_SERVICIO");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [mensaje, setMensaje] = useState("");
-  const [filtro, setFiltro] = useState("");
+  const [notice, setNotice] = useState("");
+  const [history, setHistory] = useState<Maintenance[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [closeId, setCloseId] = useState("");
 
-  function cambiarCampo<K extends keyof Formulario>(
-    campo: K,
-    valor: Formulario[K]
-  ) {
-    setFormulario((anterior) => ({
-      ...anterior,
-      [campo]: valor,
-    }));
-    setError("");
-    setMensaje("");
+  const loadMachines = useCallback(async () => {
+    setLoading(true); setLoadError("");
+    const params = new URLSearchParams({ page: "1", pageSize: "50" });
+    if (statusFilter) params.set("status", statusFilter);
+    try { const result = await backendRequest<ListResponse<Machine>>(`machines?${params}`); setMachines(result.data); }
+    catch { setLoadError("No se pudieron cargar las máquinas. Inténtalo de nuevo."); setMachines([]); }
+    finally { setLoading(false); }
+  }, [statusFilter]);
+  useEffect(() => {
+    // The callback starts an asynchronous request; its state updates occur after the response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMachines();
+  }, [loadMachines]);
+
+  async function openModal(machine: Machine, nextMode: Mode) {
+    setSelected(machine); setMode(nextMode); setError(""); setNotice(""); setReason(""); setHistory([]); setHistoryError(""); setCloseId("");
+    setStartsAt(localDateTimeNow()); setEndedAt(localDateTimeNow());
+    setTargetStatus(machine.status === "FUERA_SERVICIO" ? "DISPONIBLE" : "FUERA_SERVICIO");
+    if (nextMode === "close") {
+      setHistoryLoading(true);
+      try {
+        const result = await backendRequest<ListResponse<Maintenance>>(`machines/${encodeURIComponent(machine.id)}/maintenance?openOnly=true&page=1&pageSize=50`);
+        setHistory(result.data);
+        if (result.data.length) setCloseId(result.data[0].id);
+        else setError("No se encontró un período de mantenimiento abierto para esta máquina.");
+      } catch (err) { setHistoryError(explainError(err)); }
+      finally { setHistoryLoading(false); }
+    }
+  }
+  function closeModal() { if (saving) return; setMode(null); setSelected(null); setError(""); setHistoryError(""); }
+  async function refreshAndNotify(text: string) { setMode(null); setSelected(null); setNotice(text); await loadMachines(); }
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!selected || !mode) return;
+    setError(""); setNotice("");
+    const trimmed = reason.trim();
+    if (mode === "open" && (!startsAt || !Number.isFinite(new Date(startsAt).getTime()))) { setError("Indica una fecha de inicio válida."); return; }
+    if (mode === "open" && (trimmed.length < 10 || trimmed.length > 250)) { setError("El motivo debe tener entre 10 y 250 caracteres."); return; }
+    if (mode === "close" && !endedAt) { setError("Indica una fecha de fin válida."); return; }
+    if (mode === "close" && history.find((item) => item.id === closeId) && new Date(endedAt).getTime() < new Date(history.find((item) => item.id === closeId)!.startedAt).getTime()) { setError("La fecha de fin no puede ser anterior a la fecha de inicio."); return; }
+    if (mode === "status" && (trimmed.length < 10 || trimmed.length > 250)) { setError("El motivo debe tener entre 10 y 250 caracteres."); return; }
+    setSaving(true);
+    try {
+      if (mode === "open") {
+        await backendRequest(`machines/${encodeURIComponent(selected.id)}/maintenance`, { method: "POST", body: JSON.stringify({ reason: trimmed, startsAt: isoDateTime(startsAt) }) });
+        await refreshAndNotify("Mantenimiento registrado");
+      } else if (mode === "close") {
+        if (!closeId) { setError("Selecciona un mantenimiento abierto."); return; }
+        await backendRequest(`machines/${encodeURIComponent(selected.id)}/maintenance/${encodeURIComponent(closeId)}/complete`, { method: "PATCH", body: JSON.stringify({ endedAt: isoDateTime(endedAt) }) });
+        await refreshAndNotify("Mantenimiento finalizado");
+      } else {
+        await backendRequest(`machines/${encodeURIComponent(selected.id)}/status`, { method: "PATCH", body: JSON.stringify({ status: targetStatus, reason: trimmed }) });
+        await refreshAndNotify("Estado de la máquina actualizado");
+      }
+    } catch (err) { setError(explainError(err)); }
+    finally { setSaving(false); }
   }
 
-  function guardar(evento: React.FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
-    setError("");
-    setMensaje("");
-
-    if (
-      !formulario.maquinaId ||
-      !formulario.motivo.trim() ||
-      !formulario.fechaInicio ||
-      !formulario.responsable.trim()
-    ) {
-      setError("Completa todos los campos obligatorios.");
-      return;
-    }
-
-    if (formulario.motivo.trim().length < 10) {
-      setError("El motivo debe tener al menos 10 caracteres.");
-      return;
-    }
-
-    if (
-      formulario.fechaFin &&
-      formulario.fechaFin < formulario.fechaInicio
-    ) {
-      setError(
-        "La fecha de finalización no puede ser anterior al inicio."
-      );
-      return;
-    }
-
-    if (
-      formulario.estado === "DISPONIBLE" &&
-      !formulario.fechaFin
-    ) {
-      setError(
-        "Indica la fecha de finalización para marcar la máquina como disponible."
-      );
-      return;
-    }
-
-    const datos = {
-      ...formulario,
-      motivo: formulario.motivo.trim(),
-      responsable: formulario.responsable.trim(),
-    };
-
-    if (editandoId !== null) {
-      setRegistros((anteriores) =>
-        anteriores.map((registro) =>
-          registro.id === editandoId
-            ? { ...registro, ...datos }
-            : registro
-        )
-      );
-
-      setMensaje(
-        "Mantenimiento actualizado en la demostración."
-      );
-    } else {
-      const nuevoRegistro: Mantenimiento = {
-        ...datos,
-        id: Math.max(0, ...registros.map((r) => r.id)) + 1,
-      };
-
-      setRegistros((anteriores) => [
-        nuevoRegistro,
-        ...anteriores,
-      ]);
-
-      setMensaje(
-        "Mantenimiento registrado en la demostración."
-      );
-    }
-
-    setFormulario({ ...formularioVacio });
-    setEditandoId(null);
-  }
-
-  function editar(registro: Mantenimiento) {
-    setFormulario({
-      maquinaId: registro.maquinaId,
-      estado: registro.estado,
-      motivo: registro.motivo,
-      fechaInicio: registro.fechaInicio,
-      fechaFin: registro.fechaFin,
-      responsable: registro.responsable,
-    });
-
-    setEditandoId(registro.id);
-    setError("");
-    setMensaje("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function cancelarEdicion() {
-    setFormulario({ ...formularioVacio });
-    setEditandoId(null);
-    setError("");
-    setMensaje("");
-  }
-
-  const registrosFiltrados = registros.filter((registro) => {
-    const maquina = maquinas.find(
-      (m) => m.id === registro.maquinaId
-    );
-
-    return (maquina?.nombre ?? "")
-      .toLowerCase()
-      .includes(filtro.toLowerCase());
-  });
-
-  return (
-    <div className={styles.contenedor}>
-      <header className={styles.encabezado}>
-        <h1>GKDS/GYM</h1>
-      </header>
-
-      <div className={styles.estructura}>
-        <aside className={styles.sidebar}>
-          <nav className={styles.navegacion}>
-            {menu.map((opcion) => (
-              <Link
-                key={opcion.nombre}
-                href={opcion.ruta}
-                className={
-                  opcion.nombre === "Máquinas"
-                    ? styles.menuActivo
-                    : styles.menuItem
-                }
-              >
-                {opcion.nombre}
-              </Link>
-            ))}
-          </nav>
-        </aside>
-
-        <main className={styles.contenido}>
-          <div className={styles.tituloSeccion}>
-            <h2>Mantenimiento de máquinas</h2>
-            <span className={styles.etiqueta}>Prototipo</span>
-          </div>
-
-          <section className={styles.tarjeta}>
-            <h3>
-              {editandoId !== null
-                ? "Actualizar mantenimiento"
-                : "Registrar mantenimiento"}
-            </h3>
-
-            <form onSubmit={guardar}>
-              <div className={styles.formulario}>
-                <div className={styles.campo}>
-                  <label htmlFor="maquina">Máquina</label>
-                  <select
-                    id="maquina"
-                    value={formulario.maquinaId}
-                    onChange={(e) =>
-                      cambiarCampo(
-                        "maquinaId",
-                        Number(e.target.value)
-                      )
-                    }
-                  >
-                    <option value={0}>
-                      Seleccionar máquina
-                    </option>
-                    {maquinas.map((maquina) => (
-                      <option
-                        key={maquina.id}
-                        value={maquina.id}
-                      >
-                        {maquina.nombre} - {maquina.ubicacion}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className={styles.campo}>
-                  <label htmlFor="estado">
-                    Estado de la máquina
-                  </label>
-                  <select
-                    id="estado"
-                    value={formulario.estado}
-                    onChange={(e) =>
-                      cambiarCampo(
-                        "estado",
-                        e.target.value as EstadoMaquina
-                      )
-                    }
-                  >
-                    <option value="EN_MANTENIMIENTO">
-                      En mantenimiento
-                    </option>
-                    <option value="DISPONIBLE">
-                      Disponible
-                    </option>
-                    <option value="FUERA_SERVICIO">
-                      Fuera de servicio
-                    </option>
-                  </select>
-                </div>
-
-                <div className={styles.campo}>
-                  <label htmlFor="motivo">
-                    Motivo del mantenimiento
-                  </label>
-                  <textarea
-                    id="motivo"
-                    rows={3}
-                    maxLength={255}
-                    placeholder="Describa el motivo"
-                    value={formulario.motivo}
-                    onChange={(e) =>
-                      cambiarCampo("motivo", e.target.value)
-                    }
-                  />
-                </div>
-
-                <div className={styles.campo}>
-                  <label htmlFor="responsable">
-                    Usuario responsable
-                  </label>
-                  <input
-                    id="responsable"
-                    type="text"
-                    maxLength={80}
-                    placeholder="Nombre del responsable"
-                    value={formulario.responsable}
-                    onChange={(e) =>
-                      cambiarCampo(
-                        "responsable",
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-
-                <div className={styles.campo}>
-                  <label htmlFor="inicio">
-                    Fecha de inicio
-                  </label>
-                  <input
-                    id="inicio"
-                    type="date"
-                    value={formulario.fechaInicio}
-                    onChange={(e) =>
-                      cambiarCampo(
-                        "fechaInicio",
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-
-                <div className={styles.campo}>
-                  <label htmlFor="fin">
-                    Fecha de finalización
-                  </label>
-                  <input
-                    id="fin"
-                    type="date"
-                    min={formulario.fechaInicio || undefined}
-                    value={formulario.fechaFin}
-                    onChange={(e) =>
-                      cambiarCampo(
-                        "fechaFin",
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-              </div>
-
-              {error && (
-                <div className={styles.error} role="alert">
-                  {error}
-                </div>
-              )}
-
-              {mensaje && (
-                <div className={styles.exito} role="status">
-                  {mensaje}
-                </div>
-              )}
-
-              <div className={styles.acciones}>
-                {editandoId !== null && (
-                  <button
-                    type="button"
-                    className={styles.botonSecundario}
-                    onClick={cancelarEdicion}
-                  >
-                    Cancelar edición
-                  </button>
-                )}
-
-                <button
-                  type="submit"
-                  className={styles.botonPrincipal}
-                >
-                  {editandoId !== null
-                    ? "Guardar cambios"
-                    : "Registrar mantenimiento"}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <section className={styles.tarjeta}>
-            <div className={styles.historialTitulo}>
-              <h3>Historial de mantenimientos</h3>
-
-              <input
-                type="search"
-                placeholder="Buscar máquina"
-                aria-label="Buscar máquina"
-                value={filtro}
-                onChange={(e) => setFiltro(e.target.value)}
-              />
-            </div>
-
-            <div className={styles.tablaContenedor}>
-              <table className={styles.tabla}>
-                <thead>
-                  <tr>
-                    <th>Máquina</th>
-                    <th>Estado</th>
-                    <th>Motivo</th>
-                    <th>Inicio</th>
-                    <th>Finalización</th>
-                    <th>Responsable</th>
-                    <th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {registrosFiltrados.map((registro) => {
-                    const maquina = maquinas.find(
-                      (m) => m.id === registro.maquinaId
-                    );
-
-                    return (
-                      <tr key={registro.id}>
-                        <td>{maquina?.nombre ?? "Desconocida"}</td>
-                        <td>
-                          <span
-                            className={
-                              registro.estado === "DISPONIBLE"
-                                ? styles.disponible
-                                : registro.estado ===
-                                    "EN_MANTENIMIENTO"
-                                  ? styles.mantenimiento
-                                  : styles.fueraServicio
-                            }
-                          >
-                            {nombreEstado(registro.estado)}
-                          </span>
-                        </td>
-                        <td>{registro.motivo}</td>
-                        <td>
-                          {mostrarFecha(registro.fechaInicio)}
-                        </td>
-                        <td>
-                          {mostrarFecha(registro.fechaFin)}
-                        </td>
-                        <td>{registro.responsable}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className={styles.botonEditar}
-                            onClick={() => editar(registro)}
-                          >
-                            Editar
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                  {registrosFiltrados.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className={styles.sinResultados}
-                      >
-                        No se encontraron mantenimientos.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-        
-        </main>
-      </div>
-    </div>
-  );
+  return <main className={styles.page}>
+    <div className={styles.heading}><div><p className={styles.eyebrow}>ADMINISTRACIÓN</p><h2>Mantenimiento de máquinas</h2><p className={styles.intro}>Registra intervenciones y mantén actualizado el estado de los equipos.</p></div></div>
+    {notice && <p className={styles.success} role="status">{notice}</p>}
+    <section className={styles.panel} aria-labelledby="list-heading">
+      <div className={styles.panelHead}><div><h3 id="list-heading">Máquinas del gimnasio</h3><p>El estado y los períodos se actualizan desde el sistema.</p></div><div className={styles.filter}><label htmlFor="status-filter">Filtrar estado</label><select id="status-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "" | Status)}><option value="">Todos los estados</option>{Object.entries(statusNames).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div></div>
+      {loading ? <p className={styles.state} role="status">Cargando máquinas...</p> : loadError ? <div className={styles.state} role="alert">{loadError}<button className={styles.secondary} type="button" onClick={() => void loadMachines()}>Reintentar</button></div> : machines.length === 0 ? <p className={styles.state}>No hay máquinas registradas.</p> : <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>Máquina</th><th>Tipo</th><th>Ubicación</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{machines.map((machine) => <tr key={machine.id}><td data-label="Máquina"><strong>{machine.name}</strong></td><td data-label="Tipo">{machine.type}</td><td data-label="Ubicación">{machine.location}</td><td data-label="Estado"><span className={`${styles.badge} ${machine.status === "DISPONIBLE" ? styles.available : machine.status === "EN_MANTENIMIENTO" ? styles.maintenance : styles.outOfService}`}>{statusNames[machine.status]}</span></td><td data-label="Acciones"><div className={styles.rowActions}>{machine.status === "EN_MANTENIMIENTO" ? <button className={styles.action} type="button" onClick={() => void openModal(machine, "close")}>Finalizar mantenimiento</button> : <button className={styles.action} type="button" onClick={() => void openModal(machine, "open")}>Registrar mantenimiento</button>}<button className={styles.linkAction} type="button" onClick={() => void openModal(machine, "status")}>Cambiar estado</button></div></td></tr>)}</tbody></table></div>}
+    </section>
+    {mode && selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) closeModal(); }}><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className={styles.dialogHead}><div><p>{selected.name} · {selected.location}</p><h3 id="dialog-title">{mode === "open" ? "Registrar mantenimiento" : mode === "close" ? "Finalizar mantenimiento" : "Cambiar estado de máquina"}</h3></div><button type="button" aria-label="Cerrar" className={styles.close} onClick={closeModal} disabled={saving}>×</button></div>
+      {historyLoading ? <p className={styles.state} role="status">Cargando mantenimiento activo...</p> : historyError ? <p className={styles.error} role="alert">{historyError}</p> : <form onSubmit={submit}>
+        {mode === "close" && history.length > 0 && <div className={styles.field}><label htmlFor="period">Período abierto</label><select id="period" value={closeId} onChange={(e) => setCloseId(e.target.value)}>{history.map((item) => <option key={item.id} value={item.id}>{dateTime(item.startedAt)} · {item.reason}</option>)}</select><p className={styles.help}>Inicio: {dateTime(history.find((item) => item.id === closeId)?.startedAt ?? null)} · Motivo: {history.find((item) => item.id === closeId)?.reason}</p></div>}
+        {mode === "open" && <><div className={styles.field}><label htmlFor="reason">Motivo del mantenimiento</label><textarea id="reason" minLength={10} maxLength={250} required rows={4} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe el motivo (10–250 caracteres)" /><small>{reason.length}/250</small></div><div className={styles.field}><label htmlFor="starts-at">Fecha y hora de inicio</label><input id="starts-at" type="datetime-local" required value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></div></>}
+        {mode === "close" && <div className={styles.field}><label htmlFor="ended-at">Fecha y hora de fin</label><input id="ended-at" type="datetime-local" required value={endedAt} onChange={(e) => setEndedAt(e.target.value)} /></div>}
+        {mode === "status" && <><div className={styles.field}><label htmlFor="target-status">Estado de la máquina</label><select id="target-status" value={targetStatus} onChange={(e) => setTargetStatus(e.target.value as "DISPONIBLE" | "FUERA_SERVICIO")}><option value="DISPONIBLE">Disponible</option><option value="FUERA_SERVICIO">Fuera de servicio</option></select><p className={styles.help}>El estado «En mantenimiento» se registra con un período de mantenimiento.</p></div><div className={styles.field}><label htmlFor="status-reason">Motivo del cambio</label><textarea id="status-reason" minLength={10} maxLength={250} required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo (10–250 caracteres)" /></div></>}
+        {error && <p className={styles.error} role="alert">{error}</p>}
+        <div className={styles.dialogActions}><button className={styles.secondary} type="button" onClick={closeModal} disabled={saving}>Cancelar</button><button className={styles.primary} type="submit" disabled={saving || (mode === "close" && (historyLoading || !!historyError || !history.length))}>{saving ? "Guardando…" : mode === "open" ? "Registrar mantenimiento" : mode === "close" ? "Finalizar" : "Guardar estado"}</button></div>
+      </form>}
+    </section></div>}
+  </main>;
 }

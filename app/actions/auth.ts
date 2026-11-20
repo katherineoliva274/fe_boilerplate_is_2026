@@ -1,8 +1,8 @@
-
 "use server";
 
 import { redirect } from "next/navigation";
-import { createSession, deleteSession } from "@/lib/session";
+import { backendApiUrl } from "@/lib/backend-url";
+import { createSession, deleteSession, getRefreshToken, type TokenPair } from "@/lib/session";
 
 export type LoginState = {
   error?: string;
@@ -10,127 +10,79 @@ export type LoginState = {
 };
 
 type UserRole = "RECEPCION_ADMIN" | "ENTRENADOR" | "MIEMBRO";
-
-type AuthenticatedUser = {
-  id: string;
-  email: string;
-  role: UserRole;
-  isActive: boolean;
+type AuthResponse = TokenPair & {
+  user: { id: string; email: string; role: UserRole; isActive: boolean };
 };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function apiEndpoint(path: string): URL {
-  const base = process.env.API_URL;
-  if (!base) {
-    throw new Error("Falta la variable API_URL.");
-  }
-
-  return new URL(path, base.endsWith("/") ? base : `${base}/`);
+function messageFrom(value: unknown, fallback: string) {
+  if (!value || typeof value !== "object") return fallback;
+  const message = (value as { message?: unknown }).message;
+  if (typeof message === "string") return message;
+  if (Array.isArray(message)) return message.filter((item): item is string => typeof item === "string").join(" ");
+  return fallback;
 }
 
-async function authenticate(email: string, password: string) {
-  const response = await fetch(apiEndpoint("auth/login"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    cache: "no-store",
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    return null;
-  }
-
-  if (!response.ok) {
-    throw new Error(`Error de autenticación: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  const token: string | undefined =
-    data.token ?? data.accessToken ?? data.access_token;
-
-  if (!token) {
-    throw new Error("La API no devolvió un token.");
-  }
-
-  return token;
-}
-
-async function getAuthenticatedUser(
-  token: string,
-): Promise<AuthenticatedUser> {
-  const response = await fetch(apiEndpoint("auth/me"), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error("No fue posible verificar el usuario.");
-  }
-
-  const user: AuthenticatedUser = await response.json();
-
-  if (
-    !user.isActive ||
-    !["RECEPCION_ADMIN", "ENTRENADOR", "MIEMBRO"].includes(user.role)
-  ) {
-    throw new Error("Usuario inactivo o rol no autorizado.");
-  }
-
-  return user;
-}
-
-export async function login(
-  _prevState: LoginState,
-  formData: FormData,
-): Promise<LoginState> {
-  const email = String(formData.get("email") ?? "").trim();
+export async function login(_prevState: LoginState, formData: FormData): Promise<LoginState> {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  if (!email || !password) return { error: "Ingresa tu correo y contraseña.", email };
+  if (!EMAIL_REGEX.test(email)) return { error: "Ingresa un correo válido.", email };
 
-  if (!email || !password) {
-    return { error: "Ingresa tu correo y contraseña.", email };
-  }
-
-  if (!EMAIL_REGEX.test(email)) {
-    return { error: "Ingresa un correo válido.", email };
-  }
-
-  let token: string | null;
-  let user: AuthenticatedUser;
-
+  let authenticatedUser: AuthResponse["user"];
+  let redirectTo: string;
   try {
-    token = await authenticate(email, password);
-
-    if (!token) {
+    const response = await fetch(backendApiUrl("auth/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ email, password }),
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => null) as Partial<AuthResponse> | null;
+    if (response.status === 401 || response.status === 403) {
       return { error: "Correo o contraseña incorrectos.", email };
     }
-
-    user = await getAuthenticatedUser(token);
-    await createSession(token);
+    if (!response.ok || !payload?.accessToken || !payload.refreshToken || !payload.user) {
+      return { error: messageFrom(payload, "No se pudo iniciar sesión. Intenta nuevamente."), email };
+    }
+    if (!payload.user.isActive || !["RECEPCION_ADMIN", "ENTRENADOR", "MIEMBRO"].includes(payload.user.role)) {
+      return { error: "La cuenta no está activa o no tiene un rol habilitado.", email };
+    }
+    authenticatedUser = payload.user;
+    await createSession({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      expiresIn: payload.expiresIn,
+    });
+    redirectTo = authenticatedUser.role === "RECEPCION_ADMIN"
+      ? "/admin"
+      : authenticatedUser.role === "ENTRENADOR"
+        ? "/entrenador"
+        : "/mi-membresia";
   } catch (error) {
-    console.error("Error al iniciar sesión:", error);
-    return {
-      error: "No se pudo iniciar sesión. Verifica tus datos.",
-      email,
-    };
+    // Next's redirect is a control-flow exception and must escape this block.
+    if (error instanceof Error && error.message === "NEXT_REDIRECT") throw error;
+    console.error("No se pudo conectar con el backend durante el login.");
+    return { error: "No se pudo conectar con el backend. Verifica que la API esté activa.", email };
   }
-
-  switch (user.role) {
-    case "RECEPCION_ADMIN":
-      redirect("/admin");
-
-    case "ENTRENADOR":
-      redirect("/entrenador");
-
-    case "MIEMBRO":
-      redirect("/mi-membresia");
-  }
+  redirect(redirectTo);
 }
 
 export async function logout() {
+  const refreshToken = await getRefreshToken();
+  try {
+    if (refreshToken) {
+      await fetch(backendApiUrl("auth/logout"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+        cache: "no-store",
+      });
+    }
+  } catch {
+    // La limpieza local debe completarse incluso si el backend no está disponible.
+  }
   await deleteSession();
   redirect("/login");
 }

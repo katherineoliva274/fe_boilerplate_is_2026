@@ -1,649 +1,187 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import styles from "./page.module.css";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { backendRequest, BackendRequestError } from "@/lib/backend-client";
+import styles from "../../mi-progreso/domain.module.css";
 
-interface Miembro {
+type Member = { memberId: string; memberName: string; memberNumber: string | null };
+type Exercise = { id: string; name: string; muscleGroup: string };
+type CurrentRoutine = {
   id: string;
-  name: string;
-  membershipActive: boolean;
-}
-
-interface Ejercicio {
-  id: string;
-  name: string;
-  muscleGroup: string;
-}
-
-interface FilaEjercicio {
-  clave: number;
-  exerciseId: string;
-  weekday: string;
-  sets: string;
-  reps: string;
-  position: string;
-}
-
-interface Rutina {
-  id: string;
-  memberId: string;
   name: string;
   goal: string;
   version: number;
-  status: "VIGENTE" | "REEMPLAZADA";
-  assignedAt: string;
   startsOn: string;
   endsOn: string;
-  exerciseCount: number;
+  exercises: { exerciseName: string; weekday: number; sets: number; reps: number; position: number }[];
+};
+type ExerciseRow = { exerciseId: string; weekday: number; sets: number; reps: number; position: number };
+
+export default function AssignRoutine() {
+  return (
+    <Suspense fallback={<main className={styles.page}><p className={styles.loading}>Cargando…</p></main>}>
+      <AssignRoutineForm />
+    </Suspense>
+  );
 }
 
-interface AlmacenRutinas {
-  rutinas: Rutina[];
-}
-
-interface Errores {
-  member?: string;
-  name?: string;
-  goal?: string;
-  startsOn?: string;
-  endsOn?: string;
-  exercises?: string;
-  filas: Record<number, Partial<Record<"exerciseId" | "weekday" | "sets" | "reps" | "position", string>>>;
-}
-
-const CLAVE_RUTINAS = "gkds_rutinas_prototipo";
-const MIEMBRO_CON_ERROR = "mem-5";
-
-const MENSAJE_SERVIDOR = "No se pudo asignar la rutina";
-const MENSAJE_SIN_MEMBRESIA = "El miembro no tiene membresía vigente";
-
-const miembros: Miembro[] = [
-  { id: "mem-1", name: "Ana Martínez", membershipActive: true },
-  { id: "mem-2", name: "Luis Hernández", membershipActive: true },
-  { id: "mem-3", name: "María López", membershipActive: true },
-  { id: "mem-4", name: "Carlos Ramírez", membershipActive: false },
-  { id: MIEMBRO_CON_ERROR, name: "Sofía Castillo", membershipActive: true },
-];
-
-const ejercicios: Ejercicio[] = [
-  { id: "ex-1", name: "Sentadilla con barra", muscleGroup: "Piernas" },
-  { id: "ex-2", name: "Press de banca", muscleGroup: "Pecho" },
-  { id: "ex-3", name: "Peso muerto", muscleGroup: "Espalda" },
-  { id: "ex-4", name: "Dominadas", muscleGroup: "Espalda" },
-  { id: "ex-5", name: "Press militar", muscleGroup: "Hombros" },
-  { id: "ex-6", name: "Curl de bíceps", muscleGroup: "Brazos" },
-  { id: "ex-7", name: "Fondos en paralelas", muscleGroup: "Brazos" },
-  { id: "ex-8", name: "Zancadas", muscleGroup: "Piernas" },
-  { id: "ex-9", name: "Plancha abdominal", muscleGroup: "Core" },
-  { id: "ex-10", name: "Remo con mancuerna", muscleGroup: "Espalda" },
-];
-
-const dias = [
-  { valor: "1", nombre: "Lunes" },
-  { valor: "2", nombre: "Martes" },
-  { valor: "3", nombre: "Miércoles" },
-  { valor: "4", nombre: "Jueves" },
-  { valor: "5", nombre: "Viernes" },
-  { valor: "6", nombre: "Sábado" },
-  { valor: "7", nombre: "Domingo" },
-];
-
-const menu = [
-  { nombre: "Inicio", ruta: "/" },
-  { nombre: "Membresías", ruta: "/admin/membresias" },
-  { nombre: "Clases y reservas", ruta: "/clases" },
-  { nombre: "Entrenadores", ruta: "/entrenador/rutinas/nueva" },
-  { nombre: "Pagos", ruta: "/pagos" },
-  { nombre: "Máquinas", ruta: "/maquinas" },
-  { nombre: "Notificaciones", ruta: "/notificaciones" },
-  { nombre: "Reportes", ruta: "/reportes" },
-];
-
-function dosDigitos(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function mostrarFecha(iso: string): string {
-  const f = new Date(iso);
-  return `${dosDigitos(f.getDate())}/${dosDigitos(f.getMonth() + 1)}/${f.getFullYear()}`;
-}
-
-function mostrarFechaIso(texto: string): string {
-  const [anio, mes, dia] = texto.split("-");
-  return `${dia}/${mes}/${anio}`;
-}
-
-function crearFila(clave: number, posicion: number): FilaEjercicio {
-  return {
-    clave,
-    exerciseId: "",
-    weekday: "1",
-    sets: "3",
-    reps: "10",
-    position: String(posicion),
-  };
-}
-
-function enteroEnRango(valor: string, min: number, max: number): boolean {
-  if (!/^\d+$/.test(valor.trim())) return false;
-  const n = Number(valor);
-  return n >= min && n <= max;
-}
-
-function leerAlmacen(): AlmacenRutinas {
-  try {
-    const crudo = window.sessionStorage.getItem(CLAVE_RUTINAS);
-    return crudo ? (JSON.parse(crudo) as AlmacenRutinas) : { rutinas: [] };
-  } catch {
-    return { rutinas: [] };
-  }
-}
-
-function guardarAlmacen(almacen: AlmacenRutinas) {
-  window.sessionStorage.setItem(CLAVE_RUTINAS, JSON.stringify(almacen));
-}
-
-export default function AsignarRutinaPage() {
-  const [cargado, setCargado] = useState(false);
-  const [memberId, setMemberId] = useState("");
-  const [nombre, setNombre] = useState("");
-  const [objetivo, setObjetivo] = useState("");
-  const [inicio, setInicio] = useState("");
-  const [fin, setFin] = useState("");
-  const [filas, setFilas] = useState<FilaEjercicio[]>([crearFila(1, 1)]);
-  const [siguienteClave, setSiguienteClave] = useState(2);
-  const [errores, setErrores] = useState<Errores>({ filas: {} });
-  const [guardando, setGuardando] = useState(false);
-  const [exito, setExito] = useState<Rutina | null>(null);
+function AssignRoutineForm() {
+  const searchParams = useSearchParams();
+  const [memberId, setMemberId] = useState(searchParams.get("memberId") ?? "");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [catalog, setCatalog] = useState<Exercise[]>([]);
+  const [snapshot, setSnapshot] = useState<{ memberId: string; routine: CurrentRoutine | null } | null>(null);
+  const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
+  const [starts, setStarts] = useState("");
+  const [ends, setEnds] = useState("");
+  const [rows, setRows] = useState<ExerciseRow[]>([]);
   const [error, setError] = useState("");
-  const [vigente, setVigente] = useState<Rutina | null>(null);
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const current = snapshot?.memberId === memberId ? snapshot.routine : null;
 
   useEffect(() => {
-    const temporizador = setTimeout(() => setCargado(true), 400);
-    return () => clearTimeout(temporizador);
+    Promise.all([
+      backendRequest<{ data: Member[] }>("/trainers/me/members?page=1&pageSize=50"),
+      backendRequest<{ data: Exercise[] }>("/exercises?page=1&pageSize=50"),
+    ])
+      .then(([memberResult, exerciseResult]) => {
+        setMembers(memberResult.data);
+        setCatalog(exerciseResult.data);
+      })
+      .catch(() => setError("No se pudieron cargar clientes o ejercicios."))
+      .finally(() => setLoading(false));
   }, []);
 
-  function cambiarMiembro(id: string) {
-    setMemberId(id);
-    const actual = leerAlmacen().rutinas.find(
-      (r) => r.memberId === id && r.status === "VIGENTE"
-    );
-    setVigente(actual ?? null);
-  }
-
-  function actualizarFila(clave: number, campo: keyof FilaEjercicio, valor: string) {
-    setFilas((anteriores) =>
-      anteriores.map((f) => (f.clave === clave ? { ...f, [campo]: valor } : f))
-    );
-  }
-
-  function agregarFila() {
-    if (filas.length >= 50) return;
-    setFilas((anteriores) => [
-      ...anteriores,
-      crearFila(siguienteClave, anteriores.length + 1),
-    ]);
-    setSiguienteClave((n) => n + 1);
-  }
-
-  function quitarFila(clave: number) {
-    setFilas((anteriores) =>
-      anteriores.length > 1 ? anteriores.filter((f) => f.clave !== clave) : anteriores
-    );
-  }
-
-  function validar(): Errores {
-    const e: Errores = { filas: {} };
-    const nombreLimpio = nombre.trim();
-    const objetivoLimpio = objetivo.trim();
-
-    if (!memberId) e.member = "Seleccione un miembro";
-
-    if (nombreLimpio.length < 3 || nombreLimpio.length > 80) {
-      e.name = "El nombre debe tener entre 3 y 80 caracteres";
-    }
-
-    if (objetivoLimpio.length < 3 || objetivoLimpio.length > 250) {
-      e.goal = "El objetivo debe tener entre 3 y 250 caracteres";
-    }
-
-    if (!inicio) e.startsOn = "Ingrese la fecha de inicio";
-    if (!fin) e.endsOn = "Ingrese la fecha de fin";
-    if (inicio && fin && inicio > fin) {
-      e.endsOn = "La fecha de fin no puede ser anterior al inicio";
-    }
-
-    if (filas.length === 0) {
-      e.exercises = "Agregue al menos un ejercicio";
-    }
-
-    const usados = new Map<string, number>();
-    for (const f of filas) {
-      const fe: Errores["filas"][number] = {};
-      if (!f.exerciseId) fe.exerciseId = "Seleccione un ejercicio";
-      if (!enteroEnRango(f.weekday, 1, 7)) fe.weekday = "Día de 1 a 7";
-      if (!enteroEnRango(f.sets, 1, 10)) fe.sets = "Series de 1 a 10";
-      if (!enteroEnRango(f.reps, 1, 100)) fe.reps = "Repeticiones de 1 a 100";
-      if (!enteroEnRango(f.position, 1, 50)) {
-        fe.position = "Posición de 1 a 50";
-      } else if (enteroEnRango(f.weekday, 1, 7)) {
-        const combinacion = `${Number(f.weekday)}-${Number(f.position)}`;
-        if (usados.has(combinacion)) {
-          fe.position = "Ya existe un ejercicio en ese día y posición";
-        } else {
-          usados.set(combinacion, f.clave);
+  useEffect(() => {
+    if (!memberId) return;
+    let active = true;
+    backendRequest<CurrentRoutine | null>(`/trainers/me/members/${memberId}/routines/current`)
+      .then((routine) => {
+        if (!active) return;
+        setSnapshot({ memberId, routine });
+        if (routine) {
+          setName(routine.name);
+          setGoal(routine.goal);
+          setStarts(routine.startsOn);
+          setEnds(routine.endsOn);
+          setRows(routine.exercises.map((exercise, index) => ({
+            exerciseId: catalog.find((item) => item.name === exercise.exerciseName)?.id ?? "",
+            weekday: exercise.weekday,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            position: exercise.position || index + 1,
+          })));
         }
-      }
-      if (Object.keys(fe).length > 0) e.filas[f.clave] = fe;
-    }
+      })
+      .catch(() => {
+        if (!active) return;
+        setSnapshot({ memberId, routine: null });
+        setError("No se pudo cargar la rutina actual del cliente.");
+      });
+    return () => { active = false; };
+  }, [memberId, catalog]);
 
-    return e;
+  function updateRow(index: number, key: keyof ExerciseRow, value: number | string) {
+    setRows((currentRows) => currentRows.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, [key]: value } : row
+    )));
   }
 
-  function hayErrores(e: Errores): boolean {
-    return (
-      Boolean(e.member || e.name || e.goal || e.startsOn || e.endsOn || e.exercises) ||
-      Object.keys(e.filas).length > 0
-    );
-  }
-
-  async function guardar(ev: React.FormEvent) {
-    ev.preventDefault();
-    if (guardando) return;
-
-    setExito(null);
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError("");
-
-    const resultado = validar();
-    setErrores(resultado);
-    if (hayErrores(resultado)) return;
-
-    setGuardando(true);
-
+    setSuccess("");
+    if (!memberId || !current) {
+      setError("Se requiere un cliente con rutina vigente para crear una versión.");
+      return;
+    }
+    if (name.trim().length < 3 || goal.trim().length < 3 || !starts || !ends || starts > ends || !rows.length || rows.some((row) => !row.exerciseId)) {
+      setError("Completa nombre, objetivo, fechas y al menos un ejercicio válido.");
+      return;
+    }
+    setSaving(true);
     try {
-      await new Promise((resolver) => setTimeout(resolver, 700));
-
-      const miembro = miembros.find((m) => m.id === memberId);
-      if (!miembro) throw new Error("Miembro no asignado");
-      if (!miembro.membershipActive) {
-        setError(MENSAJE_SIN_MEMBRESIA);
-        return;
-      }
-      if (miembro.id === MIEMBRO_CON_ERROR) {
-        throw new Error("Fallo simulado del servidor");
-      }
-
-      const almacen = leerAlmacen();
-      const versiones = almacen.rutinas.filter((r) => r.memberId === memberId);
-      const nueva: Rutina = {
-        id: `rut-${Date.now()}`,
-        memberId,
-        name: nombre.trim(),
-        goal: objetivo.trim(),
-        version: versiones.length + 1,
-        status: "VIGENTE",
-        assignedAt: new Date().toISOString(),
-        startsOn: inicio,
-        endsOn: fin,
-        exerciseCount: filas.length,
-      };
-
-      const siguiente: AlmacenRutinas = {
-        rutinas: [
-          ...almacen.rutinas.map((r) =>
-            r.memberId === memberId && r.status === "VIGENTE"
-              ? { ...r, status: "REEMPLAZADA" as const }
-              : r
-          ),
-          nueva,
-        ],
-      };
-
-      guardarAlmacen(siguiente);
-      setExito(nueva);
-      setVigente(nueva);
-      setNombre("");
-      setObjetivo("");
-      setInicio("");
-      setFin("");
-      setFilas([crearFila(siguienteClave, 1)]);
-      setSiguienteClave((n) => n + 1);
-      setMemberId("");
-      setVigente(null);
-      setErrores({ filas: {} });
-    } catch {
-      setError(MENSAJE_SERVIDOR);
+      await backendRequest(`/trainers/me/members/${memberId}/routines/versions`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedCurrentVersion: current.version,
+          name: name.trim(),
+          goal: goal.trim(),
+          startsOn: starts,
+          endsOn: ends,
+          exercises: rows,
+        }),
+      });
+      setSuccess("Nueva versión de rutina guardada.");
+      const refreshed = await backendRequest<CurrentRoutine | null>(`/trainers/me/members/${memberId}/routines/current`);
+      setSnapshot({ memberId, routine: refreshed });
+    } catch (cause) {
+      setError(cause instanceof BackendRequestError && cause.status === 409
+        ? "La rutina fue actualizada; vuelve a cargarla."
+        : cause instanceof BackendRequestError && cause.status === 404
+          ? "El miembro ya no tiene una asignación activa contigo."
+          : cause instanceof BackendRequestError && cause.status === 400
+            ? cause.message
+            : cause instanceof BackendRequestError && cause.status === 403
+              ? "No tienes permiso para ajustar rutinas."
+              : "No se pudo guardar la rutina.");
     } finally {
-      setGuardando(false);
+      setSaving(false);
     }
   }
 
   return (
-    <div className={styles.contenedor}>
-      <header className={styles.encabezado}>
-        <h1>
-          GKDS <span>FITNESS</span>
-        </h1>
+    <main className={styles.page}>
+      <header className={styles.heading}>
+        <div><h1>Ajustar rutina</h1><p>Crea una versión nueva de la rutina vigente del cliente.</p></div>
       </header>
-
-      <div className={styles.estructura}>
-        <aside className={styles.sidebar}>
-          <p className={styles.menuTitulo}>MENÚ PRINCIPAL</p>
-          <nav className={styles.navegacion}>
-            {menu.map((opcion) => (
-              <Link
-                href={opcion.ruta}
-                key={opcion.nombre}
-                className={
-                  opcion.nombre === "Entrenadores"
-                    ? styles.menuActivo
-                    : styles.menuItem
-                }
-              >
-                {opcion.nombre}
-              </Link>
-            ))}
-          </nav>
-        </aside>
-
-        <main className={styles.contenido}>
-          <div className={styles.tituloSeccion}>
-            <h2>Asignar rutina</h2>
-            <span className={styles.etiqueta}>PROTOTIPO</span>
-          </div>
-
-          <section className={styles.tarjetaFormulario}>
-            <h3>Formulario</h3>
-
-            {!cargado ? (
-              <p role="status" className={styles.estado}>
-                Cargando miembros y ejercicios...
-              </p>
-            ) : miembros.length === 0 ? (
-              <p role="status" className={styles.estado}>
-                No tienes miembros asignados
-              </p>
-            ) : (
-              <form className={styles.formulario} onSubmit={guardar} noValidate>
-                {exito && (
-                  <div role="status" className={styles.exito}>
-                    <strong>Rutina asignada</strong>
-                    <span>
-                      {exito.name} · versión {exito.version} · VIGENTE · asignada el{" "}
-                      {mostrarFecha(exito.assignedAt)} · fin{" "}
-                      {mostrarFechaIso(exito.endsOn)} · {exito.exerciseCount}{" "}
-                      {exito.exerciseCount === 1 ? "ejercicio" : "ejercicios"}
-                    </span>
-                  </div>
-                )}
-                {error && (
-                  <p role="alert" className={styles.error}>
-                    {error}
-                  </p>
-                )}
-
-                <div className={styles.rejilla}>
-                  <div className={styles.campo}>
-                    <label htmlFor="member">Miembro asignado</label>
-                    <select
-                      id="member"
-                      value={memberId}
-                      aria-invalid={errores.member ? true : undefined}
-                      onChange={(e) => cambiarMiembro(e.target.value)}
-                    >
-                      <option value="">Seleccionar...</option>
-                      {miembros.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    {errores.member && (
-                      <p role="alert" className={styles.errorCampo}>
-                        {errores.member}
-                      </p>
-                    )}
-                    {vigente && (
-                      <p className={styles.ayuda}>
-                        Tiene la rutina «{vigente.name}» (versión {vigente.version}) vigente.
-                        Se reemplazará y se conservará en el historial.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={styles.campo}>
-                    <label htmlFor="name">Nombre de rutina</label>
-                    <input
-                      id="name"
-                      type="text"
-                      value={nombre}
-                      maxLength={80}
-                      placeholder="Escribir..."
-                      aria-invalid={errores.name ? true : undefined}
-                      onChange={(e) => setNombre(e.target.value)}
-                    />
-                    {errores.name && (
-                      <p role="alert" className={styles.errorCampo}>
-                        {errores.name}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={styles.campo}>
-                    <label htmlFor="goal">Objetivo</label>
-                    <textarea
-                      id="goal"
-                      rows={3}
-                      value={objetivo}
-                      maxLength={250}
-                      placeholder="Escribir..."
-                      aria-invalid={errores.goal ? true : undefined}
-                      onChange={(e) => setObjetivo(e.target.value)}
-                    />
-                    {errores.goal && (
-                      <p role="alert" className={styles.errorCampo}>
-                        {errores.goal}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={styles.campo}>
-                    <span className={styles.etiquetaCampo}>Fecha inicio / fin</span>
-                    <div className={styles.par}>
-                      <div className={styles.subcampo}>
-                        <input
-                          id="startsOn"
-                          type="date"
-                          aria-label="Fecha de inicio"
-                          value={inicio}
-                          aria-invalid={errores.startsOn ? true : undefined}
-                          onChange={(e) => setInicio(e.target.value)}
-                        />
-                        {errores.startsOn && (
-                          <p role="alert" className={styles.errorCampo}>
-                            {errores.startsOn}
-                          </p>
-                        )}
-                      </div>
-                      <div className={styles.subcampo}>
-                        <input
-                          id="endsOn"
-                          type="date"
-                          aria-label="Fecha de fin"
-                          value={fin}
-                          aria-invalid={errores.endsOn ? true : undefined}
-                          onChange={(e) => setFin(e.target.value)}
-                        />
-                        {errores.endsOn && (
-                          <p role="alert" className={styles.errorCampo}>
-                            {errores.endsOn}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+      {loading ? <p className={styles.loading}>Cargando clientes y ejercicios…</p> : (
+        <section className={styles.card}>
+          <label className={styles.field}>Miembro asignado
+            <select value={memberId} onChange={(event) => setMemberId(event.target.value)}>
+              <option value="">Selecciona cliente</option>
+              {members.map((member) => <option key={member.memberId} value={member.memberId}>{member.memberName} · {member.memberNumber ?? "Sin número"}</option>)}
+            </select>
+          </label>
+          {memberId && snapshot?.memberId !== memberId && <p className={styles.loading}>Cargando rutina actual…</p>}
+          {memberId && snapshot?.memberId === memberId && !current && <p className={styles.empty}>No se encontró rutina vigente para este cliente; el versionado requiere una versión actual.</p>}
+          {current && (
+            <>
+              <p className={styles.badge}>Versión actual {current.version}</p>
+              {success && <p role="status" className={styles.success}>{success}</p>}
+              {error && <p role="alert" className={styles.alert}>{error}</p>}
+              <form onSubmit={submit}>
+                <div className={styles.grid}>
+                  <label className={styles.field}>Nombre<input minLength={3} maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} /></label>
+                  <label className={styles.field}>Objetivo<textarea minLength={3} maxLength={250} required value={goal} onChange={(event) => setGoal(event.target.value)} /></label>
+                  <label className={styles.field}>Inicio<input type="date" required value={starts} onChange={(event) => setStarts(event.target.value)} /></label>
+                  <label className={styles.field}>Fin<input type="date" min={starts} required value={ends} onChange={(event) => setEnds(event.target.value)} /></label>
                 </div>
-
-                <div className={styles.ejercicios}>
-                  <div className={styles.ejerciciosEncabezado}>
-                    <h4>Ejercicios por día</h4>
-                    <button
-                      type="button"
-                      className={styles.secundario}
-                      onClick={agregarFila}
-                      disabled={filas.length >= 50}
-                    >
-                      Agregar ejercicio
-                    </button>
+                <h2>Ejercicios por día</h2>
+                {rows.map((row, index) => (
+                  <div className={styles.mark} key={`${row.position}-${index}`}>
+                    <label className={styles.field}>Ejercicio<select required value={row.exerciseId} onChange={(event) => updateRow(index, "exerciseId", event.target.value)}><option value="">Selecciona</option>{catalog.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}</select></label>
+                    <label className={styles.field}>Día<select value={row.weekday} onChange={(event) => updateRow(index, "weekday", Number(event.target.value))}>{["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((day, dayIndex) => <option key={day} value={dayIndex + 1}>{day}</option>)}</select></label>
+                    <label className={styles.field}>Series<input type="number" min="1" max="10" value={row.sets} onChange={(event) => updateRow(index, "sets", Number(event.target.value))} /></label>
+                    <label className={styles.field}>Repeticiones<input type="number" min="1" max="100" value={row.reps} onChange={(event) => updateRow(index, "reps", Number(event.target.value))} /></label>
+                    <label className={styles.field}>Posición<input type="number" min="1" max="50" value={row.position} onChange={(event) => updateRow(index, "position", Number(event.target.value))} /></label>
+                    <button type="button" className={styles.danger} onClick={() => setRows((currentRows) => currentRows.filter((_, rowIndex) => rowIndex !== index))}>Quitar</button>
                   </div>
-
-                  {errores.exercises && (
-                    <p role="alert" className={styles.errorCampo}>
-                      {errores.exercises}
-                    </p>
-                  )}
-
-                  <ul className={styles.listaEjercicios}>
-                    {filas.map((f, indice) => {
-                      const fe = errores.filas[f.clave] ?? {};
-                      return (
-                        <li key={f.clave} className={styles.filaEjercicio}>
-                          <div className={styles.campo}>
-                            <label htmlFor={`ex-${f.clave}`}>Ejercicio {indice + 1}</label>
-                            <select
-                              id={`ex-${f.clave}`}
-                              value={f.exerciseId}
-                              aria-invalid={fe.exerciseId ? true : undefined}
-                              onChange={(e) =>
-                                actualizarFila(f.clave, "exerciseId", e.target.value)
-                              }
-                            >
-                              <option value="">Seleccionar...</option>
-                              {ejercicios.map((ex) => (
-                                <option key={ex.id} value={ex.id}>
-                                  {ex.name} ({ex.muscleGroup})
-                                </option>
-                              ))}
-                            </select>
-                            {fe.exerciseId && (
-                              <p role="alert" className={styles.errorCampo}>
-                                {fe.exerciseId}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className={styles.campo}>
-                            <label htmlFor={`wd-${f.clave}`}>Día</label>
-                            <select
-                              id={`wd-${f.clave}`}
-                              value={f.weekday}
-                              aria-invalid={fe.weekday ? true : undefined}
-                              onChange={(e) =>
-                                actualizarFila(f.clave, "weekday", e.target.value)
-                              }
-                            >
-                              {dias.map((d) => (
-                                <option key={d.valor} value={d.valor}>
-                                  {d.valor} · {d.nombre}
-                                </option>
-                              ))}
-                            </select>
-                            {fe.weekday && (
-                              <p role="alert" className={styles.errorCampo}>
-                                {fe.weekday}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className={styles.campo}>
-                            <label htmlFor={`se-${f.clave}`}>Series</label>
-                            <input
-                              id={`se-${f.clave}`}
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
-                              max={10}
-                              value={f.sets}
-                              aria-invalid={fe.sets ? true : undefined}
-                              onChange={(e) =>
-                                actualizarFila(f.clave, "sets", e.target.value)
-                              }
-                            />
-                            {fe.sets && (
-                              <p role="alert" className={styles.errorCampo}>
-                                {fe.sets}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className={styles.campo}>
-                            <label htmlFor={`re-${f.clave}`}>Repeticiones</label>
-                            <input
-                              id={`re-${f.clave}`}
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
-                              max={100}
-                              value={f.reps}
-                              aria-invalid={fe.reps ? true : undefined}
-                              onChange={(e) =>
-                                actualizarFila(f.clave, "reps", e.target.value)
-                              }
-                            />
-                            {fe.reps && (
-                              <p role="alert" className={styles.errorCampo}>
-                                {fe.reps}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className={styles.campo}>
-                            <label htmlFor={`po-${f.clave}`}>Posición</label>
-                            <input
-                              id={`po-${f.clave}`}
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
-                              max={50}
-                              value={f.position}
-                              aria-invalid={fe.position ? true : undefined}
-                              onChange={(e) =>
-                                actualizarFila(f.clave, "position", e.target.value)
-                              }
-                            />
-                            {fe.position && (
-                              <p role="alert" className={styles.errorCampo}>
-                                {fe.position}
-                              </p>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            className={styles.quitar}
-                            onClick={() => quitarFila(f.clave)}
-                            disabled={filas.length === 1}
-                            aria-label={`Quitar ejercicio ${indice + 1}`}
-                          >
-                            Quitar
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-
-                <div className={styles.accionesFormulario}>
-                  <button type="submit" className={styles.guardar} disabled={guardando}>
-                    {guardando ? "Guardando..." : "Guardar"}
-                  </button>
+                ))}
+                <div className={styles.actions}>
+                  <button type="button" className={styles.secondary} disabled={rows.length >= 50} onClick={() => setRows((currentRows) => [...currentRows, { exerciseId: "", weekday: 1, sets: 3, reps: 10, position: currentRows.length + 1 }])}>Agregar ejercicio</button>
+                  <button disabled={saving} className={styles.primary}>{saving ? "Guardando…" : "Guardar nueva versión"}</button>
                 </div>
               </form>
-            )}
-          </section>
-        </main>
-      </div>
-    </div>
+            </>
+          )}
+        </section>
+      )}
+    </main>
   );
 }

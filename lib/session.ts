@@ -1,26 +1,58 @@
 import { cookies } from "next/headers";
+import type { NextResponse } from "next/server";
 
-export const SESSION_COOKIE = "session";
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+export const ACCESS_COOKIE = "gkds_access";
+export const REFRESH_COOKIE = "gkds_refresh";
+export const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-// Guarda el token de sesión en una cookie httpOnly (no accesible desde JS del cliente).
-export async function createSession(token: string) {
-  const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, token, {
+export type TokenPair = {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn?: number;
+};
+
+function cookieOptions(maxAge: number) {
+  const secure = process.env.COOKIE_SECURE === "true";
+  return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure,
+    sameSite: secure ? ("none" as const) : ("lax" as const),
     path: "/",
-    expires: new Date(Date.now() + SESSION_DURATION_MS),
-  });
+    maxAge,
+  };
 }
 
+export async function createSession(tokens: TokenPair) {
+  const jar = await cookies();
+  jar.set(ACCESS_COOKIE, tokens.accessToken, cookieOptions(tokens.expiresIn ?? 900));
+  jar.set(REFRESH_COOKIE, tokens.refreshToken, cookieOptions(REFRESH_TTL_SECONDS));
+}
+
+export async function getAccessToken() {
+  return (await cookies()).get(ACCESS_COOKIE)?.value;
+}
+
+/** Compatibilidad con las acciones existentes; devuelve solo el access token HttpOnly. */
 export async function getSession() {
-  const cookieStore = await cookies();
-  return cookieStore.get(SESSION_COOKIE)?.value;
+  return getAccessToken();
+}
+
+export async function getRefreshToken() {
+  return (await cookies()).get(REFRESH_COOKIE)?.value;
 }
 
 export async function deleteSession() {
-  const cookieStore = await cookies();
-  cookieStore.delete(SESSION_COOKIE);
+  const jar = await cookies();
+  jar.delete(ACCESS_COOKIE);
+  jar.delete(REFRESH_COOKIE);
+}
+
+export function setSessionCookies(response: NextResponse, tokens: TokenPair) {
+  response.cookies.set(ACCESS_COOKIE, tokens.accessToken, cookieOptions(tokens.expiresIn ?? 900));
+  response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, cookieOptions(REFRESH_TTL_SECONDS));
+}
+
+export function clearSessionCookies(response: NextResponse) {
+  response.cookies.set(ACCESS_COOKIE, "", { ...cookieOptions(0), maxAge: 0 });
+  response.cookies.set(REFRESH_COOKIE, "", { ...cookieOptions(0), maxAge: 0 });
 }
