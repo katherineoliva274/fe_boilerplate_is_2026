@@ -1,195 +1,93 @@
 
-"use client";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
+import MiMembresiaVista from "./mi-membresia-vista";
 
-import { useState } from "react";
-import Link from "next/link";
-import styles from "./page.module.css";
-
-type EstadoMembresia = "VIGENTE" | "VENCIDA";
-
-interface Membresia {
-  nombrePlan: string;
-  estado: EstadoMembresia;
-  fechaInicio: string;
-  fechaVencimiento: string;
-  beneficios: string[];
-  creditosRestantes: number | null;
-}
-
-// Datos de prueba. Después vendrán del backend.
-const membresiaEjemplo: Membresia = {
-  nombrePlan: "Plan mensual",
-  estado: "VIGENTE",
-  fechaInicio: "01/11/2026",
-  fechaVencimiento: "30/11/2026",
-  beneficios: [
-    "Acceso a instalaciones",
-    "Uso de máquinas",
-    "Clases grupales",
-  ],
-  creditosRestantes: null,
+export type MembresiaAPI = {
+  id: string;
+  planId: string;
+  planName: string;
+  benefits: string[];
+  startsOn: string;
+  endsOn: string;
+  planType: string;
+  creditsRemaining: Record<string, number>;
+  status: string;
 };
 
-const opcionesMenu = [
-  { nombre: "Inicio", ruta: "/" },
-  { nombre: "Membresías", ruta: "/mi-membresia" },
-  { nombre: "Clases y reservas", ruta: "/clases" },
-  { nombre: "Entrenadores", ruta: "/entrenadores" },
-  { nombre: "Pagos", ruta: "/pagos" },
-  { nombre: "Máquinas", ruta: "/maquinas" },
-  { nombre: "Notificaciones", ruta: "/notificaciones" },
-  { nombre: "Reportes", ruta: "/reportes" },
-];
+export default async function MiMembresiaPage() {
+  const token = await getSession();
 
-export default function MiMembresiaPage() {
-  const [membresia, setMembresia] =
-    useState<Membresia | null>(membresiaEjemplo);
+  if (!token) {
+    redirect("/login");
+  }
 
-  const [mostrarBeneficios, setMostrarBeneficios] =
-    useState(false);
+  const apiUrl = process.env.API_URL;
+
+  if (!apiUrl) {
+    throw new Error("Falta configurar API_URL.");
+  }
+
+  const base = apiUrl.endsWith("/")
+    ? apiUrl
+    : `${apiUrl}/`;
+
+  const usuarioResponse = await fetch(
+    new URL("auth/me", base),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (usuarioResponse.status === 401) {
+    redirect("/login");
+  }
+
+  if (!usuarioResponse.ok) {
+    throw new Error("No se pudo verificar la sesión.");
+  }
+
+  const usuario = await usuarioResponse.json();
+
+  if (!usuario.isActive) {
+    redirect("/login");
+  }
+
+  if (usuario.role !== "MIEMBRO") {
+    redirect("/");
+  }
+
+  const response = await fetch(
+    new URL("memberships/me", base),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (response.status === 401) {
+    redirect("/login");
+  }
+
+  if (response.status === 403) {
+    redirect("/");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `No se pudo consultar la membresía: ${response.status}`
+    );
+  }
+
+  const data: { membership: MembresiaAPI | null } =
+    await response.json();
 
   return (
-    <div className={styles.contenedor}>
-      <header className={styles.encabezado}>
-        <h1>GKDS/GYM</h1>
-      </header>
-
-      <div className={styles.estructura}>
-        <aside className={styles.sidebar}>
-          
-
-          <nav className={styles.navegacion}>
-            {opcionesMenu.map((opcion) => (
-              <Link
-                key={opcion.nombre}
-                href={opcion.ruta}
-                className={
-                  opcion.nombre === "Membresías"
-                    ? styles.menuActivo
-                    : styles.menuItem
-                }
-              >
-                {opcion.nombre}
-              </Link>
-            ))}
-          </nav>
-        </aside>
-
-        <main className={styles.contenido}>
-          <div className={styles.tituloSeccion}>
-            <div>
-              <h2>Mi membresía</h2>
-            </div>
-
-            <span className={styles.etiquetaEjemplo}>
-              Prototipo
-            </span>
-          </div>
-
-          <section className={styles.tarjeta}>
-            <h3>Detalle de la información</h3>
-
-            {membresia ? (
-              <>
-                <div className={styles.fila}>
-                  <strong>Plan contratado</strong>
-                  <span>{membresia.nombrePlan}</span>
-                </div>
-
-                <div className={styles.fila}>
-                  <strong>Estado</strong>
-                  <span
-                    className={
-                      membresia.estado === "VIGENTE"
-                        ? styles.vigente
-                        : styles.vencida
-                    }
-                  >
-                    {membresia.estado}
-                  </span>
-                </div>
-
-                <div className={styles.fila}>
-                  <strong>Inicio</strong>
-                  <span>{membresia.fechaInicio}</span>
-                </div>
-
-                <div className={styles.fila}>
-                  <strong>Vencimiento</strong>
-                  <span>{membresia.fechaVencimiento}</span>
-                </div>
-
-                <div className={styles.fila}>
-                  <strong>Beneficios del plan</strong>
-
-                  <button
-                    type="button"
-                    className={styles.botonTexto}
-                    onClick={() =>
-                      setMostrarBeneficios(!mostrarBeneficios)
-                    }
-                  >
-                    {mostrarBeneficios
-                      ? "Ocultar beneficios"
-                      : "Ver información"}
-                  </button>
-                </div>
-
-                {mostrarBeneficios && (
-                  <ul className={styles.beneficios}>
-                    {membresia.beneficios.map((beneficio) => (
-                      <li key={beneficio}>{beneficio}</li>
-                    ))}
-                  </ul>
-                )}
-
-                <div className={styles.fila}>
-                  <strong>Créditos restantes</strong>
-                  <span>
-                    {membresia.creditosRestantes ?? "No aplica"}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <div className={styles.sinMembresia}>
-                No tienes una membresía registrada
-              </div>
-            )}
-
-            <div className={styles.acciones}>
-              <button
-                type="button"
-                className={styles.botonPrincipal}
-                onClick={() =>
-                  window.alert(
-                    "La consulta de planes se implementará próximamente."
-                  )
-                }
-              >
-                Ver planes
-              </button>
-            </div>
-          </section>
-
-        
-
-          <div className={styles.pruebas}>
-            <span>Pruebas de interfaz:</span>
-            <button
-              type="button"
-              onClick={() => setMembresia(membresiaEjemplo)}
-            >
-              Con membresía
-            </button>
-            <button
-              type="button"
-              onClick={() => setMembresia(null)}
-            >
-              Sin membresía
-            </button>
-          </div>
-        </main>
-      </div>
-    </div>
+    <MiMembresiaVista membresia={data.membership ?? null} />
   );
 }
