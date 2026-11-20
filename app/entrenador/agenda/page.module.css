@@ -428,3 +428,5 @@
     align-items: flex-start;
   }
 }
+
+.error { background: #fff0f0; color: #b32630; border-radius: 7px; padding: 14px 16px; margin: 12px 0; }

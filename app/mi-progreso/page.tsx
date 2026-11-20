@@ -1,47 +1,94 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import styles from "./page.module.css";
-import { fechaVisible, leerRegistros, nombreEjercicio, numeroVisible, type Registro } from "./_lib/progreso";
+import { useSearchParams } from "next/navigation";
+import { backendRequest } from "@/lib/backend-client";
+import s from "./domain.module.css";
 
-const PAGINA = 10;
-export default function MiProgresoPage() {
-    const [registros, setRegistros] = useState<Registro[] | null>(null);
-    const [pagina, setPagina] = useState(1);
-    const [guardado, setGuardado] = useState(false);
-    useEffect(() => {
-        setRegistros(leerRegistros().sort((a, b) => b.recordDate.localeCompare(a.recordDate)));
-        setGuardado(new URLSearchParams(window.location.search).get("guardado") === "1");
-    }, []);
-    const total = registros?.length ?? 0;
-    const paginas = Math.max(1, Math.ceil(total / PAGINA));
-    const paginaActual = Math.min(pagina, paginas);
-    const visibles = (registros ?? []).slice((paginaActual - 1) * PAGINA, paginaActual * PAGINA);
-    const inicial = registros?.length ? [...registros].sort((a, b) => a.recordDate.localeCompare(b.recordDate))[0].id : null;
-    const ultimo = registros?.[0];
-    return <div className={styles.layout}>
-        <header className={styles.header}><h1>GKDS <span>FITNESS</span></h1></header>
-        <div className={styles.body}>
-            <aside className={styles.sidebar}><p>MENÚ PRINCIPAL</p><nav><Link href="/">Inicio</Link><Link href="/mi-rutina">Mi rutina</Link><Link className={styles.active} href="/mi-progreso">Mi progreso</Link><Link href="/entrenadores">Entrenadores</Link><Link href="/pagos">Pagos</Link></nav></aside>
-            <main className={styles.main}>
-                <div className={styles.titleRow}><div><p className={styles.eyebrow}>SEGUIMIENTO PERSONAL</p><h2>Mi progreso físico</h2><p>Registra tus mediciones y revisa cómo has evolucionado.</p></div><span className={styles.tag}>PROTOTIPO</span></div>
-                <div className={styles.summaryGrid}>
-                    <div className={styles.summary}><span>Registros realizados</span><strong>{total}</strong><small>En tu historial</small></div>
-                    <div className={styles.summary}><span>Último peso</span><strong>{ultimo ? `${ultimo.weightKg.toFixed(2)} kg` : "—"}</strong><small>{ultimo ? fechaVisible(ultimo.recordDate) : "Sin registros"}</small></div>
-                    <div className={styles.summary}><span>Marcas registradas</span><strong>{(registros ?? []).reduce((s, r) => s + r.marks.length, 0)}</strong><small>Marcas de ejercicios</small></div>
-                </div>
-                <section className={styles.card}>
-                    <div className={styles.cardHeading}><div><h3>Historial de progreso</h3><p>Ordenado desde el registro más reciente.</p></div><Link href="/mi-progreso/nuevo" className={styles.primary}>+ Nuevo registro</Link></div>
-                    {guardado && <div className={styles.success} role="status">Progreso guardado</div>}
-                    {registros === null ? <div className={styles.empty}>Cargando historial...</div> : registros.length === 0 ? <div className={styles.empty}><div className={styles.emptyIcon}>↗</div><h4>Aún no has registrado tu progreso</h4><p>Comienza con tu peso, medidas o marcas de ejercicios.</p><Link className={styles.primary} href="/mi-progreso/nuevo">Registrar mi progreso</Link></div> : <>
-                        <div className={styles.tableWrap}><table><thead><tr><th>Fecha</th><th>Peso</th><th>Cintura</th><th>Pecho</th><th>Brazo</th><th>Marcas</th><th>Acción</th></tr></thead><tbody>
-                            {visibles.map(r => <tr key={r.id}><td><strong>{fechaVisible(r.recordDate)}</strong>{r.id === inicial && <span className={styles.startBadge}>Punto de partida</span>}</td><td>{r.weightKg.toFixed(2)} kg</td><td>{numeroVisible(r.waistCm)}{r.waistCm !== null ? " cm" : ""}</td><td>{numeroVisible(r.chestCm)}{r.chestCm !== null ? " cm" : ""}</td><td>{numeroVisible(r.armCm)}{r.armCm !== null ? " cm" : ""}</td><td>{r.marks.length ? <details className={styles.marksDetail}><summary>{r.marks.length} {r.marks.length === 1 ? "marca" : "marcas"}</summary><ul>{r.marks.map((m, i) => <li key={i}>{nombreEjercicio(m.exerciseId)} · {m.weightKg.toFixed(2)} kg · {m.reps} reps</li>)}</ul></details> : "—"}</td><td><Link href={`/mi-progreso/${r.id}/editar`} className={styles.editLink}>Editar</Link></td></tr>)}
-                        </tbody></table></div>
-                        <div className={styles.pagination}><span>{total} {total === 1 ? "registro" : "registros"} · Página {paginaActual} de {paginas}</span><div><button type="button" disabled={paginaActual <= 1} onClick={() => setPagina(p => p - 1)}>Anterior</button><button type="button" disabled={paginaActual >= paginas} onClick={() => setPagina(p => p + 1)}>Siguiente</button></div></div>
-                    </>}
-                </section>
-            </main>
+type RecordRow = {
+  id: string;
+  recordDate: string;
+  weightKg: number;
+  waistCm: number | null;
+  chestCm: number | null;
+  armCm: number | null;
+  isBaseline: boolean;
+  marks: { exerciseId: string; weightKg: number; reps: number }[];
+};
+type PageData = { data: RecordRow[]; total: number; page: number; pageSize: number };
+
+export default function PageView() {
+  return (
+    <Suspense fallback={<main className={s.page}><p className={s.loading}>Cargando tu progreso…</p></main>}>
+      <ProgressHistory />
+    </Suspense>
+  );
+}
+
+function ProgressHistory() {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<PageData | null>(null);
+  const [error, setError] = useState("");
+  const search = useSearchParams();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    backendRequest<PageData>(`/progress-records/me?page=${page}&pageSize=10`, { signal: controller.signal })
+      .then((result) => {
+        setData(result);
+        setError("");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError("No se pudo cargar tu progreso.");
+      });
+    return () => controller.abort();
+  }, [page]);
+
+  const pages = Math.ceil((data?.total ?? 0) / 10);
+
+  return (
+    <main className={s.page}>
+      <header className={s.heading}>
+        <div>
+          <h1>Mi progreso físico</h1>
+          <p>Registra mediciones y revisa tu historial personal.</p>
         </div>
-    </div>;
+        <div className={s.actions}>
+          <Link className={s.secondary} href="/mi-progreso/evolucion">Ver evolución</Link>
+          <Link className={s.primary} href="/mi-progreso/nuevo">+ Nuevo registro</Link>
+        </div>
+      </header>
+      {search.get("guardado") === "1" && <p className={s.success}>Progreso guardado</p>}
+      {error && <p className={s.alert} role="alert">{error}</p>}
+      <section className={s.card}>
+        <h2>Historial</h2>
+        {!data ? <p className={s.loading}>Cargando historial…</p> : data.data.length === 0 ? (
+          <p className={s.empty}>Aún no has registrado tu progreso</p>
+        ) : (
+          <>
+            <div className={s.tableWrap}>
+              <table>
+                <thead><tr><th>Fecha</th><th>Peso</th><th>Cintura</th><th>Pecho</th><th>Brazo</th><th>Marcas</th><th>Acción</th></tr></thead>
+                <tbody>{data.data.map((record) => (
+                  <tr key={record.id}>
+                    <td>{record.recordDate}{record.isBaseline && <><br /><span className={s.badge}>Punto de partida</span></>}</td>
+                    <td>{record.weightKg} kg</td><td>{record.waistCm ?? "—"}</td><td>{record.chestCm ?? "—"}</td><td>{record.armCm ?? "—"}</td>
+                    <td>{record.marks.length}</td><td><Link href={`/mi-progreso/${record.id}/editar`}>Editar</Link></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <div className={s.pagination}>
+              <span>{data.total} registros · página {page} de {pages}</span>
+              <div>
+                <button className={s.secondary} disabled={page <= 1} onClick={() => setPage(page - 1)}>Anterior</button>
+                <button className={s.secondary} disabled={page >= pages} onClick={() => setPage(page + 1)}>Siguiente</button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
 }

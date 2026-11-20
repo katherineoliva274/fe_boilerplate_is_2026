@@ -1,24 +1,65 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/session";
+import { backendApiUrl } from "@/lib/backend-url";
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  clearSessionCookies,
+  setSessionCookies,
+  type TokenPair,
+} from "@/lib/session";
 
-const publicRoutes = ["/login"];
+function tokenNeedsRefresh(token?: string) {
+  if (!token) return true;
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return true;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(normalized)) as { exp?: number };
+    return !claims.exp || claims.exp * 1000 <= Date.now() + 45_000;
+  } catch {
+    return true;
+  }
+}
 
-// Chequeo optimista: solo verifica que exista la cookie de sesión.
-// Si el backend expone un token verificable (p. ej. JWT), validarlo aquí.
-export function proxy(request: NextRequest) {
+async function rotate(refreshToken: string): Promise<TokenPair | null> {
+  try {
+    const response = await fetch(backendApiUrl("auth/refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const value = await response.json() as Partial<TokenPair>;
+    return typeof value.accessToken === "string" && typeof value.refreshToken === "string"
+      ? { accessToken: value.accessToken, refreshToken: value.refreshToken, expiresIn: value.expiresIn }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublicRoute = publicRoutes.includes(pathname);
-  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
+  const isPublic = pathname === "/login" || pathname === "/registro" || pathname === "/manus-routes.json";
+  if (isPublic) return NextResponse.next();
 
-  if (!isPublicRoute && !hasSession) {
-    return NextResponse.redirect(new URL("/login", request.nextUrl));
+  const access = request.cookies.get(ACCESS_COOKIE)?.value;
+  const refresh = request.cookies.get(REFRESH_COOKIE)?.value;
+  if (access && !tokenNeedsRefresh(access)) return NextResponse.next();
+
+  if (refresh) {
+    const tokens = await rotate(refresh);
+    if (tokens) {
+      const response = NextResponse.next();
+      setSessionCookies(response, tokens);
+      return response;
+    }
   }
 
-  if (isPublicRoute && hasSession) {
-    return NextResponse.redirect(new URL("/", request.nextUrl));
-  }
-
-  return NextResponse.next();
+  const response = NextResponse.redirect(new URL("/login", request.url));
+  clearSessionCookies(response);
+  return response;
 }
 
 export const config = {
