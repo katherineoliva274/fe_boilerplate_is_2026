@@ -1,17 +1,15 @@
-import { logout } from "@/app/actions/auth";
+import { redirect } from "next/navigation";
+import { backendServerFetch } from "@/lib/backend-server";
 
-export default function Home() {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6">
-      <h1 className="text-4xl font-semibold">Hello world</h1>
-      <form action={logout}>
-        <button
-          type="submit"
-          className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
-        >
-          Cerrar sesión
-        </button>
-      </form>
-    </div>
-  );
+type AuthenticatedUser = { role: "RECEPCION_ADMIN" | "ENTRENADOR" | "MIEMBRO"; isActive: boolean };
+
+export default async function Home() {
+  const response = await backendServerFetch("auth/me");
+  if (!response.ok) redirect("/login");
+  const user = await response.json() as AuthenticatedUser;
+  if (!user.isActive) redirect("/login");
+  if (user.role === "RECEPCION_ADMIN") redirect("/admin");
+  if (user.role === "ENTRENADOR") redirect("/entrenador");
+  if (user.role === "MIEMBRO") redirect("/mi-membresia");
+  redirect("/login");
 }

@@ -1,0 +1,204 @@
+{
+  "routes": [
+    {
+      "path": "/",
+      "title": "Inicio"
+    },
+    {
+      "path": "/admin",
+      "title": "Admin"
+    },
+    {
+      "path": "/admin/calificaciones",
+      "title": "Calificaciones"
+    },
+    {
+      "path": "/admin/clases",
+      "title": "Clases"
+    },
+    {
+      "path": "/admin/cobros",
+      "title": "Cobros"
+    },
+    {
+      "path": "/admin/cobros/anular",
+      "title": "Anular"
+    },
+    {
+      "path": "/admin/ingresos",
+      "title": "Ingresos"
+    },
+    {
+      "path": "/admin/mantenimiento",
+      "title": "Mantenimiento"
+    },
+    {
+      "path": "/admin/membresias",
+      "title": "Membresias"
+    },
+    {
+      "path": "/admin/pagos-pendientes",
+      "title": "Pagos Pendientes"
+    },
+    {
+      "path": "/admin/planes",
+      "title": "Planes"
+    },
+    {
+      "path": "/admin/reportes/entrenadores",
+      "title": "Entrenadores"
+    },
+    {
+      "path": "/admin/reportes/ingresos",
+      "title": "Ingresos"
+    },
+    {
+      "path": "/admin/reportes/ocupacion",
+      "title": "Ocupacion"
+    },
+    {
+      "path": "/admin/reportes/renovacion",
+      "title": "Renovacion"
+    },
+    {
+      "path": "/admin/sesiones",
+      "title": "Sesiones administrativas"
+    },
+    {
+      "path": "/admin/sesiones/:id",
+      "title": ":Id"
+    },
+    {
+      "path": "/clases",
+      "title": "Clases"
+    },
+    {
+      "path": "/comprobantes/:receiptId",
+      "title": ":Receiptid"
+    },
+    {
+      "path": "/entrenador",
+      "title": "Entrenador"
+    },
+    {
+      "path": "/entrenador/agenda",
+      "title": "Agenda"
+    },
+    {
+      "path": "/entrenador/clientes",
+      "title": "Clientes"
+    },
+    {
+      "path": "/entrenador/clientes/:memberId/progreso",
+      "title": "Progreso"
+    },
+    {
+      "path": "/entrenador/disponibilidad",
+      "title": "Disponibilidad"
+    },
+    {
+      "path": "/entrenador/rutinas",
+      "title": "Rutinas"
+    },
+    {
+      "path": "/entrenador/sesiones/:id/asistencia",
+      "title": "Asistencia"
+    },
+    {
+      "path": "/entrenadores",
+      "title": "Entrenadores"
+    },
+    {
+      "path": "/login",
+      "title": "Login"
+    },
+    {
+      "path": "/maquinas",
+      "title": "Maquinas"
+    },
+    {
+      "path": "/mi-membresia",
+      "title": "Mi Membresia"
+    },
+    {
+      "path": "/mi-progreso",
+      "title": "Mi Progreso"
+    },
+    {
+      "path": "/mi-progreso/:id/editar",
+      "title": "Editar"
+    },
+    {
+      "path": "/mi-progreso/evolucion",
+      "title": "Evolucion"
+    },
+    {
+      "path": "/mi-progreso/nuevo",
+      "title": "Nuevo"
+    },
+    {
+      "path": "/mi-rutina",
+      "title": "Mi Rutina"
+    },
+    {
+      "path": "/miembro",
+      "title": "Miembro"
+    },
+    {
+      "path": "/mis-reservas",
+      "title": "Mis Reservas"
+    },
+    {
+      "path": "/mis-sesiones",
+      "title": "Mis Sesiones"
+    },
+    {
+      "path": "/mis-sesiones/calificar",
+      "title": "Calificar"
+    },
+    {
+      "path": "/notificaciones",
+      "title": "Notificaciones"
+    },
+    {
+      "path": "/notificaciones/clase-cancelada",
+      "title": "Clase Cancelada"
+    },
+    {
+      "path": "/notificaciones/reserva",
+      "title": "Reserva"
+    },
+    {
+      "path": "/notificaciones/vencimiento",
+      "title": "Vencimiento"
+    },
+    {
+      "path": "/pagos",
+      "title": "Pagos"
+    },
+    {
+      "path": "/pagos/:paymentId/pagar",
+      "title": "Pagar"
+    },
+    {
+      "path": "/pagos/historial",
+      "title": "Historial"
+    },
+    {
+      "path": "/recepcion/cobros",
+      "title": "Cobros"
+    },
+    {
+      "path": "/recepcion/ingresos",
+      "title": "Ingresos"
+    },
+    {
+      "path": "/registro",
+      "title": "Registro"
+    },
+    {
+      "path": "/reportes",
+      "title": "Reportes"
+    }
+  ]
+}

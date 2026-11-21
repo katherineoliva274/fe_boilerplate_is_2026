@@ -1,0 +1,21 @@
+"use client";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { backendRequest, BackendRequestError } from "@/lib/backend-client";
+import styles from "./page.module.css";
+type Row={id:string;trainerName:string;startsAt:string;endsAt:string;status:"CONFIRMADA"|"CANCELADA"|"COMPLETADA"};
+type Page={data:Row[];total:number;page:number;pageSize:number};
+const date=(s:string)=>new Intl.DateTimeFormat("es-SV",{dateStyle:"medium"}).format(new Date(s));
+const time=(s:string)=>new Intl.DateTimeFormat("es-SV",{hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(s));
+export default function MisSesionesPage(){
+ const [result,setResult]=useState<Page|null>(null),[page,setPage]=useState(1),[loading,setLoading]=useState(true),[error,setError]=useState(""),[permission,setPermission]=useState(false),[chosen,setChosen]=useState<Row|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ const load=useCallback(async(p:number)=>{setLoading(true);setError("");try{const r=await backendRequest<Page>(`personal-sessions/me?page=${p}&pageSize=10`);setResult(r);setPermission(false)}catch(e){setError(e instanceof BackendRequestError?e.message:"No fue posible cargar tus sesiones.");setPermission(e instanceof BackendRequestError&&(e.status===401||e.status===403));}finally{setLoading(false)}},[]);
+ useEffect(()=>{void load(page)},[page,load]); // eslint-disable-line react-hooks/set-state-in-effect
+ async function cancel(){if(!chosen)return;setBusy(true);setError("");try{await backendRequest(`personal-sessions/${encodeURIComponent(chosen.id)}/cancel`,{method:"PATCH"});setMessage("Sesión cancelada");setChosen(null);await load(page)}catch(e){setError(e instanceof BackendRequestError?e.message:"No fue posible cancelar la sesión")}finally{setBusy(false)}}
+ const [now,setNow]=useState(0);useEffect(()=>{const t=setTimeout(()=>setNow(Date.now()),0);return()=>clearTimeout(t)},[]);  
+ const canCancel=(r:Row)=>r.status==="CONFIRMADA"&&new Date(r.startsAt).getTime()-now>=12*60*60*1000;
+ return <main className={styles.main}><div className={styles.pageTitle}><h2>Mis sesiones personales</h2><Link href="/entrenadores">Agendar nueva sesión</Link></div><section className={styles.card}><div className={styles.cardTop}><h3>Historial de sesiones</h3></div>
+ {permission?<p role="alert" className={styles.error}>No tienes permiso para acceder</p>:null}{message&&<p role="status" className={styles.success}>{message}</p>}{error&&!permission&&<p role="alert" className={styles.error}>{error}</p>}
+ {loading?<p role="status" className={styles.empty}>Cargando sesiones...</p>:result?.data.length===0?<p role="status" className={styles.empty}>Aún no tienes sesiones personales</p>:result&&<><div className={styles.tableWrap}><table><thead><tr><th>Entrenador</th><th>Fecha</th><th>Hora</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{result.data.map(r=><tr key={r.id}><td className={styles.strong}>{r.trainerName}</td><td>{date(r.startsAt)}</td><td>{time(r.startsAt)} – {time(r.endsAt)}</td><td><span className={styles.pill}>{r.status}</span></td><td>{canCancel(r)?<button type="button" className={styles.primary} onClick={()=>setChosen(r)}>Cancelar</button>:"—"}</td></tr>)}</tbody></table></div><div className={styles.pagination}><span>{result.total} sesiones · Página {result.page} de {Math.max(1,Math.ceil(result.total/10))}</span><div><button disabled={page<=1||loading} onClick={()=>setPage(x=>x-1)}>Anterior</button><button disabled={page>=Math.max(1,Math.ceil(result.total/10))||loading} onClick={()=>setPage(x=>x+1)}>Siguiente</button></div></div></>}
+ </section>{chosen&&<div className={styles.overlay}><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="cancel-title"><h3 id="cancel-title">¿Cancelar esta sesión?</h3><p>{chosen.trainerName} · {date(chosen.startsAt)} · {time(chosen.startsAt)} – {time(chosen.endsAt)}</p>{error&&<p role="alert" className={styles.error}>{error}</p>}<div className={styles.dialogActions}><button disabled={busy} onClick={()=>setChosen(null)}>Volver</button><button className={styles.primary} disabled={busy} onClick={()=>void cancel()}>{busy?"Procesando...":"Sí, cancelar"}</button></div></section></div>}</main>
+}
